@@ -148,7 +148,7 @@ class TestMetadataProvider:
         """Test protected resource metadata for specific service."""
         metadata = metadata_provider.get_protected_resource_metadata("calculator")
 
-        assert metadata["resource"] == "https://gateway.example.com/calculator"
+        assert metadata["resource"] == "https://gateway.example.com/calculator/mcp"
         assert metadata["authorization_servers"] == ["https://gateway.example.com"]
         assert metadata["scopes_supported"] == ["read", "calculate"]
 
@@ -314,3 +314,34 @@ class TestMetadataProvider:
         assert set(auth_metadata["scopes_supported"]) == set(
             resource_metadata["scopes_supported"]
         )
+
+    def test_get_service_canonical_uri(self, metadata_provider):
+        """Test service canonical URI generation per RFC 8707 and MCP spec."""
+        # Test basic service canonical URI
+        uri = metadata_provider.get_service_canonical_uri("calculator")
+        assert uri == "https://gateway.example.com/calculator/mcp"
+
+        # Test with different service ID
+        uri = metadata_provider.get_service_canonical_uri("weather")
+        assert uri == "https://gateway.example.com/weather/mcp"
+
+    def test_get_service_canonical_uri_trailing_slash(self):
+        """Test canonical URI generation with issuer having trailing slash."""
+        config = GatewayConfig(
+            issuer="https://gateway.example.com/",  # Note trailing slash
+            session_secret="test-secret",
+        )
+        provider = MetadataProvider(config)
+
+        uri = provider.get_service_canonical_uri("calculator")
+        assert uri == "https://gateway.example.com/calculator/mcp"
+
+    def test_get_all_service_canonical_uris(self, metadata_provider):
+        """Test getting all service canonical URIs."""
+        uris = metadata_provider.get_all_service_canonical_uris()
+
+        expected = {
+            "calculator": "https://gateway.example.com/calculator/mcp",
+            "weather": "https://gateway.example.com/weather/mcp",
+        }
+        assert uris == expected

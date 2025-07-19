@@ -4,7 +4,13 @@ This file provides guidance to Claude Code when working with the MCP OAuth Gatew
 
 ## Project Overview
 
-The **MCP OAuth Gateway** is a work-in-progress OAuth 2.1 authorization server that provides transparent authentication and authorization for Model Context Protocol (MCP) services. It acts as a secure proxy that handles all OAuth complexity, allowing users to simply access `https://gateway.example.com/<service-id>/mcp` and have authentication handled automatically.
+The **MCP OAuth Gateway** is a work-in-progress OAuth 2.1 authorization server that provides transparent authentication and authorization for Model Context Protocol (MCP) services. It acts as a secure proxy that handles all OAuth complexity, allowing users to simply access `https://gateway.example.com/{service-id}/mcp` and have authentication handled automatically.
+
+**Key Features:**
+- **Service-Specific Token Binding**: Implements RFC 8707 resource parameters with canonical URIs
+- **MCP Protocol Compliance**: Full support for MCP Authorization specification (2025-06-18)
+- **Security Middleware Stack**: DNS rebinding protection and protocol validation
+- **Single Provider Architecture**: Simplified OAuth configuration with consistent authentication
 
 ## Codebase Structure
 
@@ -44,14 +50,22 @@ src/
 - FastAPI app with OAuth 2.1 and MCP service endpoints
 - Command-line interface with config file support
 - Health checks and service discovery endpoints
+- Security middleware stack (Origin validation, MCP protocol validation)
 - CORS middleware and security headers
 - Lifespan management for async resources
 
-**Key functions:**
+**Key classes and functions:**
 - `McpGateway` class - Main gateway orchestrator with all OAuth and MCP functionality
+- `OriginValidationMiddleware` - DNS rebinding protection with localhost enforcement
+- `MCPProtocolVersionMiddleware` - MCP protocol version validation and compatibility
 - `create_app(config: Config) -> FastAPI` - Application factory
 - `main()` - CLI entry point with argument parsing
 - `_determine_provider_for_resource()` - Single provider constraint enforcement
+
+**Security Middleware Stack:**
+- **Origin Validation**: Protects against DNS rebinding attacks with configurable localhost enforcement
+- **MCP Protocol Validation**: Validates MCP-Protocol-Version headers for protocol compliance
+- **CORS Protection**: Standard CORS middleware with configurable policies
 
 ### 2. OAuth Authentication System (`auth/`)
 
@@ -163,6 +177,60 @@ OAuth metadata endpoints per RFCs:
 - **Authorization Server Metadata** (RFC 8414) at `/.well-known/oauth-authorization-server`
 - **Protected Resource Metadata** (RFC 9728) at `/.well-known/oauth-protected-resource`
 - **Service discovery** endpoints for MCP services
+- **Service-specific canonical URIs** per RFC 8707 for proper audience binding
+
+**Key methods:**
+- `get_service_canonical_uri(service_id: str)` - Generates canonical URI for service-specific tokens
+- `get_all_service_canonical_uris()` - Returns mapping of all service canonical URIs
+- `get_authorization_server_metadata()` - RFC 8414 compliant metadata
+- `get_protected_resource_metadata(service_id)` - RFC 9728 compliant resource metadata
+
+### 6. Security Middleware (`gateway.py`)
+Comprehensive security middleware stack protecting against common web attacks:
+
+#### Origin Validation Middleware
+Protects against DNS rebinding attacks with environment-aware configuration:
+
+**Features:**
+- **DNS Rebinding Protection**: Validates Origin headers against allowed origins
+- **Localhost Enforcement**: Development-friendly localhost access with production security
+- **Environment Awareness**: Different security levels for debug vs production modes
+
+**Configuration:**
+```python
+OriginValidationMiddleware(
+    allowed_origins=["https://trusted.example.com", "https://app.company.com"],
+    enforce_localhost=not config.debug  # True in production, False in development
+)
+```
+
+**Security Behavior:**
+- **Production Mode** (`debug=False`, `enforce_localhost=True`):
+  - ✅ Allowed: Origins in explicit allow list
+  - ✅ Allowed: Localhost origins (`http://localhost:*`, `https://127.0.0.1:*`)
+  - ❌ Blocked: All other origins
+- **Development Mode** (`debug=True`, `enforce_localhost=False`):
+  - ✅ Allowed: Origins in explicit allow list
+  - ✅ Allowed: Localhost origins
+  - ✅ Allowed: Any other origin (permissive for development)
+
+#### MCP Protocol Version Middleware
+Validates MCP protocol compliance and version compatibility:
+
+**Features:**
+- **Protocol Version Validation**: Ensures clients use supported MCP protocol versions
+- **Backward Compatibility**: Supports multiple MCP specification versions
+- **Path-Specific Validation**: Only validates requests to MCP endpoints (`/mcp` paths)
+
+**Supported Versions:**
+- `2025-06-18` (Current MCP specification)
+- `2025-03-26` (Backward compatibility)
+
+**Validation Logic:**
+- Validates `MCP-Protocol-Version` header on requests to `/{service-id}/mcp` endpoints
+- Returns 400 error for unsupported versions with helpful error messages
+- Allows requests without version header (backend should handle gracefully)
+- Bypasses validation for non-MCP endpoints
 
 ## Development Guidelines
 
@@ -200,6 +268,40 @@ mcp_services:
 
 3. **Test the provider** with your MCP services
 
+### Security Configuration
+
+Configure the gateway's security middleware for your environment:
+
+**Development Configuration:**
+```yaml
+host: "localhost"  # Bind to localhost for development security
+port: 8080
+issuer: "http://localhost:8080"
+debug: true  # Enables permissive Origin validation (enforce_localhost=False)
+
+cors:
+  allow_origins: ["http://localhost:3000", "https://dev.myapp.com"]
+  allow_credentials: true
+```
+
+**Production Configuration:**
+```yaml
+host: "0.0.0.0"  # Can bind to all interfaces with proper origin validation
+port: 8080
+issuer: "https://gateway.myapp.com"
+debug: false  # Enables strict Origin validation (enforce_localhost=True)
+
+cors:
+  allow_origins: ["https://myapp.com", "https://admin.myapp.com"]  # Explicit production origins
+  allow_credentials: true
+  allow_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+  allow_headers: ["Authorization", "Content-Type", "MCP-Protocol-Version"]
+```
+
+**Security Behavior by Environment:**
+- **Development** (`debug=true`): Permissive origin validation for easy testing
+- **Production** (`debug=false`): Strict origin validation with localhost fallback for debugging
+
 ### Adding New MCP Services
 
 1. **Configure the service** in `config.yaml`:
@@ -215,8 +317,9 @@ mcp_services:
 ```
 
 2. **The service will be automatically available** at `/{service-id}/mcp`
-3. **Backend services receive user context** via headers
-4. **All services must use the same OAuth provider** configured in the gateway
+3. **Service gets canonical URI** for token audience: `{issuer}/{service-id}/mcp`
+4. **Backend services receive user context** via headers
+5. **All services must use the same OAuth provider** configured in the gateway
 
 ### Code Style and Standards
 
@@ -229,22 +332,28 @@ mcp_services:
 
 ### Testing
 
-- **Unit test suite** - 15 test files covering individual components with mocking
-- **OAuth 2.1 component testing** - PKCE validation, token exchange, metadata endpoints
-- **Security boundary testing** - Token validation, redirect URI validation, error paths
-- **Configuration validation testing** - Single provider constraints, service configuration
+- **Comprehensive test suite** - 16+ test files covering all components with 197+ test cases
+- **OAuth 2.1 component testing** - PKCE validation, token exchange, metadata endpoints with canonical URIs
+- **Security middleware testing** - Origin validation, MCP protocol version validation, middleware integration
+- **Security boundary testing** - Token validation, redirect URI validation, audience binding, error paths
+- **Configuration validation testing** - Single provider constraints, service configuration, canonical URI generation
 - **Component isolation testing** - Mocked HTTP requests, isolated functionality testing
-- **pytest framework** with async support, HTTP client mocking, and component fixtures
-- **Test utilities** - PKCE generation helpers and crypto validation tools
+- **Integration testing** - End-to-end OAuth flows with service-specific token validation
+- **pytest framework** with async support, HTTP client mocking, FastAPI TestClient, and component fixtures
+- **Test utilities** - PKCE generation helpers, crypto validation tools, middleware test patterns
 
 ### Security Considerations
 
 - **NEVER log sensitive data** (tokens, secrets, user data)
 - **Validate all input** using Pydantic models
 - **Use secure random generation** for codes and secrets
-- **Implement proper CORS** for web clients
+- **Configure Origin validation** appropriately for your environment
+- **Enable localhost enforcement** in production (`debug=False`)
+- **Validate MCP protocol versions** to ensure client compatibility
+- **Implement proper CORS** for web clients with explicit origins
 - **Enforce HTTPS** in production
 - **Validate redirect URIs** strictly
+- **Use service-specific canonical URIs** for proper token audience binding
 
 ### Production Deployment
 
@@ -272,11 +381,51 @@ python -m src.gateway --config config.yaml
 ruff check src/ --fix
 ruff format src/
 
-# Run tests
+# Run tests (all 197+ test cases)
 pytest
+
+# Run specific test categories
+pytest tests/gateway/test_middleware.py  # Security middleware tests
+pytest tests/api/test_metadata.py       # Canonical URI tests
+pytest tests/integration/               # Integration tests
 
 # Type checking (if mypy is added)
 mypy src/
+```
+
+### Troubleshooting
+
+**Origin Validation Issues:**
+```bash
+# 403 Unauthorized origin errors in production
+# Check CORS configuration and debug mode:
+debug: false  # Should be false in production
+cors:
+  allow_origins: ["https://yourapp.com"]  # Add your domain
+
+# For development, enable debug mode:
+debug: true  # Allows more permissive origins
+```
+
+**MCP Protocol Version Issues:**
+```bash
+# 400 Unsupported MCP protocol version
+# Ensure your client sends supported version header:
+curl -H "MCP-Protocol-Version: 2025-06-18" https://gateway.com/service/mcp
+
+# Supported versions: 2025-06-18, 2025-03-26
+# Missing header is allowed (backend handles default)
+```
+
+**Token Audience Issues:**
+```bash
+# 401 Invalid token errors
+# Verify token audience matches service canonical URI:
+# Expected: https://gateway.com/calculator/mcp
+# Not:      https://gateway.com/calculator
+
+# Check metadata endpoint for correct canonical URI:
+curl https://gateway.com/.well-known/oauth-protected-resource?service_id=calculator
 ```
 
 ### Docker Development
@@ -295,20 +444,25 @@ docker run -p 8080:8080 \
 ### OAuth 2.1 Compliance
 - **PKCE required** for all authorization code flows
 - **Resource parameter** for audience binding per RFC 8707
+- **Service-specific canonical URIs** following format `{issuer}/{service-id}/mcp`
 - **Dynamic Client Registration** per RFC 7591
 - **Proper metadata endpoints** per RFC 8414 and RFC 9728
 
 ### MCP Protocol Support
 - **Streamable HTTP transport** as specified in MCP
+- **MCP protocol version validation** for specification compliance
 - **User context injection** for backend authorization
 - **Transparent proxying** maintains MCP protocol semantics
 - **Service-specific token scoping** prevents privilege escalation
 
 ### Security Architecture
-- **Service isolation** through audience-bound tokens
+- **Multi-layer security middleware** with DNS rebinding protection
+- **Environment-aware security** (development vs production modes)
+- **Service isolation** through audience-bound tokens with canonical URIs
 - **Single provider design** ensures consistent authentication
 - **Session management** with secure, signed sessions
 - **State validation** prevents CSRF attacks
+- **Origin validation** protects against cross-origin attacks
 
 ## Known Limitations
 

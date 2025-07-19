@@ -669,12 +669,15 @@ x-user-provider: google
 
 #### Advanced Security Features
 - PKCE code challenge validation (S256 required) ✅
-- JWT audience validation with resource binding ✅
+- JWT audience validation with service-specific resource binding ✅
 - Comprehensive redirect URI validation ✅
 - State parameter CSRF protection with expiration ✅
 - Bearer token authentication with timeout handling ✅
 - Client deduplication and credential security ✅
 - Single provider constraint enforcement ✅
+- Origin header validation for DNS rebinding protection ✅
+- MCP-Protocol-Version validation and enforcement ✅
+- Localhost binding warnings for development security ✅
 
 #### Production-Ready MCP Integration
 - HTTP proxy to backend MCP services with connection pooling ✅
@@ -693,12 +696,13 @@ x-user-provider: google
 - Configuration testing (YAML loading, environment variables, validation) ✅
 - Error handling and edge case testing with mocked scenarios ✅
 
-### ⚠️ Partial Implementation
+### ✅ Full Implementation
 
 #### Resource Parameter Support
-- Resource parameter accepted in requests ⚠️
-- Currently uses gateway issuer as audience instead of service-specific resources
-- MCP clients work with this approach but not fully RFC 8707 compliant
+- Resource parameter accepted and properly implemented per RFC 8707 ✅
+- Service-specific canonical URIs used as audience (e.g., `https://gateway.com/calculator/mcp`) ✅
+- Proper token audience binding prevents cross-service token reuse ✅
+- MCP clients get tokens bound to specific services per specification ✅
 
 ### ❌ Current Limitations
 
@@ -874,20 +878,21 @@ The gateway implements the MCP authorization specification based on OAuth 2.1 st
 - Redirect URI validation
 - State parameter for CSRF protection
 
-#### ⚠️ Partial Compliance
+#### ✅ Full Compliance
 
 **Resource Parameter Implementation**
 - Accepts resource parameter in authorization and token requests ✅
-- **Issue**: Currently uses gateway issuer as audience instead of service-specific canonical URIs
-- **MCP Requirement**: Should use canonical URIs like `https://mcp.example.com/{service-id}/mcp`
-**Single Provider Constraint**: Resource parameter binding requires all services to use the same OAuth provider per gateway instance
+- Implements service-specific canonical URIs per RFC 8707 ✅
+- Uses canonical URIs like `https://gateway.example.com/{service-id}/mcp` ✅
+- **Single Provider Constraint**: Resource parameter binding requires all services to use the same OAuth provider per gateway instance (architectural design choice)
 
 #### 📝 Implementation Notes
 
 **Resource Parameter Handling**
-- Uses gateway issuer as token audience for simplicity
-- Works effectively with MCP clients in development scenarios
-- Resource parameter accepted and stored for future enhancement
+- Implements service-specific canonical URIs per RFC 8707 (e.g., `https://gateway.com/calculator/mcp`)
+- Tokens are bound to specific services preventing cross-service reuse
+- Full compliance with MCP Authorization specification requirements
+- Proper audience validation ensures security isolation between services
 
 ### MCP Transport Specification (2025-06-18)
 

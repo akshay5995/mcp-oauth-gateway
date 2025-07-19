@@ -79,10 +79,10 @@ class TestSingleProviderDetermination:
             test_cases = [
                 None,  # No resource
                 "http://localhost:8080",  # Gateway root
-                "http://localhost:8080/calculator",  # Service resource
-                "http://localhost:8080/docs",  # Another service
-                "http://localhost:8080/unknown",  # Unknown service
-                "https://external.example.com/resource",  # External resource
+                "http://localhost:8080/calculator/mcp",  # Service resource
+                "http://localhost:8080/docs/mcp",  # Another service
+                "http://localhost:8080/unknown/mcp",  # Unknown service
+                "https://external.example.com/resource/mcp",  # External resource
             ]
 
             for resource in test_cases:
@@ -97,8 +97,8 @@ class TestSingleProviderDetermination:
 
             # Multiple calls should return the same provider
             resources = [
-                "http://localhost:8080/calculator",
-                "http://localhost:8080/another_service",
+                "http://localhost:8080/calculator/mcp",
+                "http://localhost:8080/another_service/mcp",
                 None,
                 "http://localhost:8080",
             ]
@@ -153,7 +153,7 @@ class TestSingleProviderDetermination:
 
             for i in range(1000):  # More iterations since it's simpler now
                 provider = gateway._determine_provider_for_resource(
-                    f"http://localhost:8080/service_{i}"
+                    f"http://localhost:8080/service_{i}/mcp"
                 )
                 assert provider == "github"
 
@@ -263,7 +263,7 @@ class TestProviderDeterminationEdgeCases:
 
             # Should still return the configured provider
             provider = gateway._determine_provider_for_resource(
-                "http://localhost:8080/any_resource"
+                "http://localhost:8080/any_resource/mcp"
             )
             assert provider == "github"
 

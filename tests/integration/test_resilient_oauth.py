@@ -115,13 +115,13 @@ mcp_services:
             assert len(gateway.provider_manager.providers) == 1
             
             # Test provider determination works consistently
-            provider = gateway._determine_provider_for_resource("http://localhost:8080/calculator")
+            provider = gateway._determine_provider_for_resource("http://localhost:8080/calculator/mcp")
             assert provider == "github"
             
-            provider = gateway._determine_provider_for_resource("http://localhost:8080/docs")
+            provider = gateway._determine_provider_for_resource("http://localhost:8080/docs/mcp")
             assert provider == "github"
             
-            provider = gateway._determine_provider_for_resource("http://localhost:8080/public")
+            provider = gateway._determine_provider_for_resource("http://localhost:8080/public/mcp")
             assert provider == "github"
 
 
@@ -174,7 +174,7 @@ class TestSingleProviderServiceBehavior:
             
             for service in services:
                 provider = gateway._determine_provider_for_resource(
-                    f"http://localhost:8080/{service}"
+                    f"http://localhost:8080/{service}/mcp"
                 )
                 assert provider == "github", f"Service {service} returned wrong provider: {provider}"
 
@@ -191,7 +191,7 @@ class TestSingleProviderServiceBehavior:
 
             for i in range(100):
                 provider = gateway._determine_provider_for_resource(
-                    f"http://localhost:8080/service_{i}"
+                    f"http://localhost:8080/service_{i}/mcp"
                 )
                 assert provider == "github"
 
@@ -350,8 +350,8 @@ mcp_services:
             gateway = McpGateway()
             
             # Both services should use the same provider for consistency
-            private_provider = gateway._determine_provider_for_resource("http://localhost:8080/private")
-            public_provider = gateway._determine_provider_for_resource("http://localhost:8080/public")
+            private_provider = gateway._determine_provider_for_resource("http://localhost:8080/private/mcp")
+            public_provider = gateway._determine_provider_for_resource("http://localhost:8080/public/mcp")
             
             assert private_provider == "google"
             assert public_provider == "google"  # Same provider for consistency
@@ -390,7 +390,7 @@ mcp_services:
                 gateway = McpGateway()
                 
                 # Provider determination should work for any provider type
-                provider = gateway._determine_provider_for_resource("http://localhost:8080/test_service")
+                provider = gateway._determine_provider_for_resource("http://localhost:8080/test_service/mcp")
                 assert provider == provider_name
                 
                 # Provider manager should be correctly configured

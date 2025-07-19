@@ -31,7 +31,7 @@ class TestTokenManager:
     def test_create_access_token_with_resource(self, token_manager):
         """Test access token creation with resource parameter."""
 
-        resource = "http://localhost:8080/calculator"
+        resource = "http://localhost:8080/calculator/mcp"
         token = token_manager.create_access_token(
             client_id="test_client",
             user_id="test_user_123",
@@ -53,7 +53,7 @@ class TestTokenManager:
     def test_validate_token_success(self, token_manager):
         """Test successful token validation."""
 
-        resource = "http://localhost:8080/calculator"
+        resource = "http://localhost:8080/calculator/mcp"
         token = token_manager.create_access_token(
             client_id="test_client",
             user_id="test_user_123",
@@ -78,13 +78,13 @@ class TestTokenManager:
             client_id="test_client",
             user_id="test_user_123",
             scope="read",
-            resource="http://localhost:8080/calculator",
+            resource="http://localhost:8080/calculator/mcp",
             expires_in=3600,
         )
 
         # Try to validate with wrong resource
         payload = token_manager.validate_access_token(
-            token, "http://localhost:8080/weather"
+            token, "http://localhost:8080/weather/mcp"
         )
 
         assert payload is None
@@ -193,7 +193,7 @@ class TestTokenManager:
         """Test that audience values are normalized correctly."""
 
         # Test with trailing slash
-        resource_with_slash = "http://localhost:8080/calculator/"
+        resource_with_slash = "http://localhost:8080/calculator/mcp/"
         token = token_manager.create_access_token(
             client_id="test_client",
             user_id="test_user_123",
@@ -202,7 +202,7 @@ class TestTokenManager:
         )
 
         # Should validate with normalized resource (without trailing slash)
-        normalized_resource = "http://localhost:8080/calculator"
+        normalized_resource = "http://localhost:8080/calculator/mcp"
         payload = token_manager.validate_access_token(token, normalized_resource)
 
         assert payload is not None
@@ -218,7 +218,7 @@ class TestTokenManager:
             avatar_url="https://example.com/avatar.jpg",
         )
 
-        resource = "http://localhost:8080/calculator"
+        resource = "http://localhost:8080/calculator/mcp"
         token = token_manager.create_access_token(
             client_id="test_client",
             user_id="test_user_123",

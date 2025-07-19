@@ -99,7 +99,7 @@ class ConfigManager:
         # Parse OAuth providers with single provider validation
         oauth_providers = {}
         provider_data_dict = data.get("oauth_providers", {})
-        
+
         # Validate single provider constraint
         if len(provider_data_dict) > 1:
             provider_ids = list(provider_data_dict.keys())
@@ -108,7 +108,7 @@ class ConfigManager:
                 f"Found {len(provider_data_dict)} providers: {provider_ids}. "
                 f"Please configure only one provider due to OAuth 2.1 resource parameter constraints."
             )
-        
+
         for provider_id, provider_data in provider_data_dict.items():
             oauth_providers[provider_id] = OAuthProviderConfig(
                 client_id=provider_data["client_id"],
@@ -125,11 +125,11 @@ class ConfigManager:
         configured_provider_id = None
         if oauth_providers:
             configured_provider_id = list(oauth_providers.keys())[0]
-        
+
         for service_id, service_data in data.get("mcp_services", {}).items():
             service_auth_required = service_data.get("auth_required", True)
             service_provider = service_data.get("oauth_provider")
-            
+
             # For authenticated services, ensure provider is specified and matches configured provider
             if service_auth_required:
                 if not service_provider:
@@ -137,14 +137,17 @@ class ConfigManager:
                         f"Configuration error: Service '{service_id}' requires authentication "
                         f"but no oauth_provider is specified."
                     )
-                
-                if configured_provider_id and service_provider != configured_provider_id:
+
+                if (
+                    configured_provider_id
+                    and service_provider != configured_provider_id
+                ):
                     raise ValueError(
                         f"Configuration error: Service '{service_id}' specifies OAuth provider '{service_provider}' "
                         f"but only '{configured_provider_id}' is configured. All authenticated services must use "
                         f"the same OAuth provider in a single gateway instance."
                     )
-            
+
             # For public services, oauth_provider is optional
             mcp_services[service_id] = McpServiceConfig(
                 name=service_data["name"],
@@ -168,7 +171,8 @@ class ConfigManager:
 
         # Final validation: ensure at least one OAuth provider if any service requires auth
         auth_required_services = [
-            service_id for service_id, service in mcp_services.items() 
+            service_id
+            for service_id, service in mcp_services.items()
             if service.auth_required
         ]
         if auth_required_services and not oauth_providers:
@@ -176,7 +180,7 @@ class ConfigManager:
                 f"Configuration error: Services {auth_required_services} require authentication "
                 f"but no OAuth providers are configured. Please add an OAuth provider configuration."
             )
-        
+
         # For authenticated services, ensure all use the same provider (if providers exist)
         if oauth_providers and auth_required_services:
             configured_provider = list(oauth_providers.keys())[0]
@@ -187,7 +191,7 @@ class ConfigManager:
                         f"Configuration error: All authenticated services must use the same OAuth provider. "
                         f"Service '{service_id}' uses '{service.oauth_provider}' but '{configured_provider}' is configured."
                     )
-        
+
         self.config = GatewayConfig(
             host=os.getenv("MCP_GATEWAY_HOST", data.get("host", "0.0.0.0")),
             port=int(os.getenv("MCP_GATEWAY_PORT", data.get("port", 8080))),

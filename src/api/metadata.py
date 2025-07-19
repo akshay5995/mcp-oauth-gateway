@@ -48,15 +48,37 @@ class MetadataProvider:
         }
 
         if service_id:
-            # Service-specific metadata
+            # Service-specific metadata with canonical MCP URI
             service = self.config.mcp_services.get(service_id)
             if service:
-                base_metadata["resource"] = f"{self.config.issuer}/{service_id}"
+                # Generate canonical URI per RFC 8707 and MCP spec
+                canonical_uri = self.get_service_canonical_uri(service_id)
+                base_metadata["resource"] = canonical_uri
                 base_metadata["scopes_supported"] = (
                     service.scopes or self._get_supported_scopes()
                 )
 
         return base_metadata
+
+    def get_service_canonical_uri(self, service_id: str) -> str:
+        """Generate canonical URI for a service per RFC 8707 and MCP spec.
+
+        Returns the canonical URI that should be used as the audience
+        for tokens intended for this specific MCP service.
+
+        Format: {issuer}/{service_id}/mcp
+        Example: https://gateway.example.com/calculator/mcp
+        """
+        # Normalize issuer by removing trailing slash
+        issuer = self.config.issuer.rstrip("/")
+        return f"{issuer}/{service_id}/mcp"
+
+    def get_all_service_canonical_uris(self) -> Dict[str, str]:
+        """Get canonical URIs for all configured services."""
+        return {
+            service_id: self.get_service_canonical_uri(service_id)
+            for service_id in self.config.mcp_services.keys()
+        }
 
     def _get_supported_scopes(self) -> List[str]:
         """Get all supported scopes from configured services."""

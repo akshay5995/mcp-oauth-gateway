@@ -5,10 +5,11 @@ from contextlib import asynccontextmanager
 from typing import Optional
 from urllib.parse import urlencode
 
-from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from .api.metadata import MetadataProvider
 from .auth.models import AuthorizeRequest, ClientRegistrationRequest, TokenRequest
@@ -23,6 +24,80 @@ logger = logging.getLogger(__name__)
 
 # Security scheme
 security = HTTPBearer(auto_error=False)
+
+
+class OriginValidationMiddleware(BaseHTTPMiddleware):
+    """Middleware to validate Origin header for security per MCP transport spec."""
+
+    def __init__(self, app, allowed_origins: list, enforce_localhost: bool = True):
+        super().__init__(app)
+        self.allowed_origins = set(allowed_origins)
+        self.enforce_localhost = enforce_localhost
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        # Skip validation for non-browser requests (no Origin header)
+        origin = request.headers.get("origin")
+        if not origin:
+            return await call_next(request)
+
+        # Check if origin is allowed
+        if origin not in self.allowed_origins:
+            # For localhost enforcement, check if we're running in development
+            if self.enforce_localhost:
+                if not (
+                    origin.startswith("http://localhost")
+                    or origin.startswith("http://127.0.0.1")
+                    or origin.startswith("https://localhost")
+                    or origin.startswith("https://127.0.0.1")
+                ):
+                    logger.warning(
+                        f"Blocked request from unauthorized origin: {origin}"
+                    )
+                    return Response(
+                        content="Unauthorized origin",
+                        status_code=403,
+                        headers={"Content-Type": "text/plain"},
+                    )
+
+        return await call_next(request)
+
+
+class MCPProtocolVersionMiddleware(BaseHTTPMiddleware):
+    """Middleware to validate MCP-Protocol-Version header per MCP transport spec."""
+
+    SUPPORTED_VERSIONS = {
+        "2025-06-18",
+        "2025-03-26",
+    }  # Current and backward compatibility
+    DEFAULT_VERSION = "2025-03-26"  # For backward compatibility
+
+    def __init__(self, app):
+        super().__init__(app)
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        # Only validate MCP service requests (paths containing /mcp)
+        if "/mcp" not in request.url.path:
+            return await call_next(request)
+
+        # Get MCP-Protocol-Version header
+        protocol_version = request.headers.get("mcp-protocol-version")
+
+        if protocol_version:
+            if protocol_version not in self.SUPPORTED_VERSIONS:
+                logger.warning(f"Unsupported MCP protocol version: {protocol_version}")
+                return Response(
+                    content=f"Unsupported MCP protocol version: {protocol_version}. Supported versions: {', '.join(self.SUPPORTED_VERSIONS)}",
+                    status_code=400,
+                    headers={"Content-Type": "text/plain"},
+                )
+        else:
+            # Note: Cannot modify request headers in Starlette middleware
+            # Backend services should handle missing MCP-Protocol-Version gracefully
+            logger.debug(
+                f"No MCP protocol version header found, backend should use default: {self.DEFAULT_VERSION}"
+            )
+
+        return await call_next(request)
 
 
 class McpGateway:
@@ -77,16 +152,19 @@ class McpGateway:
 
         # Check if OAuth providers are needed
         auth_required_services = [
-            service_id for service_id, service in self.config.mcp_services.items()
+            service_id
+            for service_id, service in self.config.mcp_services.items()
             if service.auth_required
         ]
-        
+
         if not self.config.oauth_providers and auth_required_services:
             validation_issues.append(
                 f"Services {auth_required_services} require authentication but no OAuth providers are configured"
             )
         elif not self.config.oauth_providers:
-            logger.info("No OAuth providers configured - gateway will only serve public services")
+            logger.info(
+                "No OAuth providers configured - gateway will only serve public services"
+            )
 
         # Check service-provider mapping for authenticated services
         available_providers = set(self.config.oauth_providers.keys())
@@ -96,6 +174,13 @@ class McpGateway:
                     validation_issues.append(
                         f"Service '{service_id}' references non-existent provider '{service.oauth_provider}'"
                     )
+
+        # Check host binding security for development
+        if self.config.debug and self.config.host == "0.0.0.0":
+            warnings.append(
+                "Running in debug mode with host '0.0.0.0' - this binds to all network interfaces. "
+                "For better security, consider binding to 'localhost' or '127.0.0.1' in development."
+            )
 
         # Log validation results
         if validation_issues:
@@ -114,6 +199,16 @@ class McpGateway:
 
     def _setup_middleware(self):
         """Setup FastAPI middleware."""
+        # MCP Protocol Version validation middleware
+        self.app.add_middleware(MCPProtocolVersionMiddleware)
+
+        # Origin validation middleware for security per MCP transport spec
+        self.app.add_middleware(
+            OriginValidationMiddleware,
+            allowed_origins=self.config.cors.allow_origins,
+            enforce_localhost=not self.config.debug,  # Enforce localhost in production
+        )
+
         # CORS middleware - configured from config
         self.app.add_middleware(
             CORSMiddleware,
@@ -150,9 +245,9 @@ class McpGateway:
             return self.metadata_provider.get_authorization_server_metadata()
 
         @self.app.get("/.well-known/oauth-protected-resource")
-        async def protected_resource_metadata():
+        async def protected_resource_metadata(service_id: Optional[str] = Query(None)):
             """OAuth 2.0 Protected Resource Metadata (RFC 9728)."""
-            return self.metadata_provider.get_protected_resource_metadata()
+            return self.metadata_provider.get_protected_resource_metadata(service_id)
 
         # OAuth 2.1 Endpoints
         @self.app.get("/oauth/authorize")
@@ -477,9 +572,9 @@ class McpGateway:
             # Check authentication if required
             if service.auth_required:
                 if not credentials or credentials.scheme.lower() != "bearer":
-                    # Return 401 with WWW-Authenticate header per MCP spec
+                    # Return 401 with WWW-Authenticate header per MCP spec pointing to service-specific metadata
                     headers = {
-                        "WWW-Authenticate": f'Bearer resource_metadata="{self.config.issuer}/.well-known/oauth-protected-resource"'
+                        "WWW-Authenticate": f'Bearer resource_metadata="{self.config.issuer}/.well-known/oauth-protected-resource?service_id={service_id}"'
                     }
                     raise HTTPException(
                         status_code=401,
@@ -487,10 +582,12 @@ class McpGateway:
                         headers=headers,
                     )
 
-                # Validate token - use gateway root as resource since that's what MCP clients send
-                resource_uri = self.config.issuer.rstrip("/")
+                # Validate token using service-specific canonical URI per RFC 8707 and MCP spec
+                resource_uri = self.metadata_provider.get_service_canonical_uri(
+                    service_id
+                )
                 logger.info(
-                    f"Validating token for service '{service_id}': issuer='{self.config.issuer}', resource_uri='{resource_uri}'"
+                    f"Validating token for service '{service_id}': canonical_uri='{resource_uri}'"
                 )
                 token_payload = self.oauth_server.validate_access_token(
                     credentials.credentials, resource=resource_uri
@@ -505,7 +602,7 @@ class McpGateway:
                         f"Token validation failed for service '{service_id}' with resource '{resource_uri}'"
                     )
                     headers = {
-                        "WWW-Authenticate": f'Bearer resource_metadata="{self.config.issuer}/.well-known/oauth-protected-resource"'
+                        "WWW-Authenticate": f'Bearer resource_metadata="{self.config.issuer}/.well-known/oauth-protected-resource?service_id={service_id}"'
                     }
                     raise HTTPException(
                         status_code=401,
@@ -540,7 +637,7 @@ class McpGateway:
 
     def _determine_provider_for_resource(self, resource: Optional[str] = None) -> str:
         """Determine which OAuth provider to use.
-        
+
         Since only one provider is configured, always returns that provider.
         The resource parameter is accepted for OAuth 2.1 compliance but all
         requests use the same configured provider.
@@ -551,7 +648,7 @@ class McpGateway:
             # No providers configured - this is a configuration error
             logger.error("No OAuth providers configured in gateway")
             raise ValueError("No OAuth providers configured")
-        
+
         # With single provider constraint, always return the configured provider
         configured_provider = available_providers[0]
         logger.debug(f"Using configured OAuth provider: {configured_provider}")

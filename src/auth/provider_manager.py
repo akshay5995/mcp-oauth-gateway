@@ -374,7 +374,7 @@ class CustomOAuthProvider(OAuthProvider):
 
 class ProviderManager:
     """Manages a single OAuth provider per gateway instance.
-    
+
     Due to OAuth 2.1 resource parameter constraints, only one OAuth provider
     can be configured per gateway instance to ensure proper domain-wide authentication.
     """
@@ -387,10 +387,10 @@ class ProviderManager:
                 f"Found {len(provider_configs)} providers: {list(provider_configs.keys())}. "
                 f"Please configure only one provider due to OAuth 2.1 resource parameter constraints."
             )
-        
+
         self.providers: Dict[str, OAuthProvider] = {}
         self.primary_provider_id: str = ""
-        
+
         # Initialize provider if one is configured
         if provider_configs:
             # Initialize the single provider
@@ -421,19 +421,19 @@ class ProviderManager:
         self, service_oauth_provider: Optional[str]
     ) -> Optional[OAuthProvider]:
         """Get provider for a specific service.
-        
+
         Returns None if no provider is configured (for public-only gateways)
         or if the service doesn't specify a provider.
         """
         if not service_oauth_provider:
             return None
-            
+
         if not self.primary_provider_id:
             raise ValueError(
                 f"Service requests provider '{service_oauth_provider}' but no "
                 f"OAuth providers are configured. This gateway only supports public services."
             )
-            
+
         if service_oauth_provider != self.primary_provider_id:
             raise ValueError(
                 f"Service requests provider '{service_oauth_provider}' but only "
@@ -441,18 +441,18 @@ class ProviderManager:
                 f"the same OAuth provider in a single gateway instance."
             )
         return self.get_provider(service_oauth_provider)
-    
+
     def get_primary_provider_id(self) -> str:
         """Get the ID of the configured OAuth provider."""
         return self.primary_provider_id
-    
+
     def get_primary_provider(self) -> Optional[OAuthProvider]:
         """Get the configured OAuth provider."""
         return self.get_provider(self.primary_provider_id)
 
     def generate_callback_state(self, provider_id: str, oauth_state: str) -> str:
         """Generate state for provider callback.
-        
+
         Validates that the provider_id matches the configured provider.
         """
         if not self.primary_provider_id:
@@ -460,7 +460,7 @@ class ProviderManager:
                 f"Cannot generate callback state for provider '{provider_id}'. "
                 f"No OAuth providers are configured."
             )
-            
+
         if provider_id != self.primary_provider_id:
             raise ValueError(
                 f"Cannot generate callback state for provider '{provider_id}'. "
@@ -482,7 +482,7 @@ class ProviderManager:
         self, provider_id: str, code: str, redirect_uri: str
     ) -> UserInfo:
         """Handle OAuth callback from provider.
-        
+
         Validates that the provider_id matches the configured provider.
         """
         if not self.primary_provider_id:
@@ -490,13 +490,13 @@ class ProviderManager:
                 f"Callback received for provider '{provider_id}' but no "
                 f"OAuth providers are configured."
             )
-            
+
         if provider_id != self.primary_provider_id:
             raise ValueError(
                 f"Callback received for provider '{provider_id}' but only "
                 f"'{self.primary_provider_id}' is configured."
             )
-        
+
         provider = self.get_provider(provider_id)
         if not provider:
             raise ValueError(f"Unknown provider: {provider_id}")
