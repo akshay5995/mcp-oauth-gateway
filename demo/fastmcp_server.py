@@ -56,9 +56,9 @@ def multiply(a: int, b: int, ctx: Context) -> int:
 if __name__ == "__main__":
     # For Docker containers, specify host explicitly and use the /mcp/ path
     mcp.run(
-        transport="http", 
+        transport="http",
         host="0.0.0.0",  # Critical for Docker - bind to all interfaces
-        port=3001, 
-        path="/mcp/",    # FastMCP serves at /mcp/ path by default
-        log_level="debug"
+        port=3001,
+        path="/mcp/",  # FastMCP serves at /mcp/ path by default
+        log_level="debug",
     )

@@ -1,8 +1,6 @@
 # Docker Compose for MCP OAuth Gateway
 # This example shows production deployment with Redis storage
 
-version: '3.8'
-
 services:
   # MCP OAuth Gateway
   mcp-gateway:
