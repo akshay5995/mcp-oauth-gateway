@@ -1,0 +1,54 @@
+# MCP OAuth Gateway Configuration for Docker Compose
+# This config uses Docker service names for inter-container communication
+
+# Gateway settings
+host: "0.0.0.0"
+port: 8080
+issuer: "http://localhost:8080"  # This stays as localhost for external access
+session_secret: "${SESSION_SECRET:-change-this-secret-key-in-production}"
+debug: false
+
+# Storage backend configuration
+storage:
+  type: "redis"  # Using Redis in Docker Compose
+  
+  redis:
+    host: redis  # Docker service name, not localhost!
+    port: 6379
+    password: "${REDIS_PASSWORD:-mypassword}"
+    db: 0
+    ssl: false
+    max_connections: 10
+    socket_timeout: 5.0
+
+# OAuth providers for user authentication
+oauth_providers:  
+  google:
+    client_id: "${GOOGLE_CLIENT_ID}"
+    client_secret: "${GOOGLE_CLIENT_SECRET}"
+    scopes:
+      - "openid"
+      - "email"
+      - "profile"
+
+# MCP services to proxy
+mcp_services:
+  calculator:
+    name: "Calculator Service"
+    url: "http://calculator-service:3001/mcp/"  # Docker service name!
+    oauth_provider: "google"
+    auth_required: true
+    scopes:
+      - "read"
+      - "calculate"
+    timeout: 30000
+
+  # Optional: If you have services running on the host machine
+  # host_service:
+  #   name: "Host Service"
+  #   url: "http://host.docker.internal:3002/mcp/"  # For Mac/Windows
+  #   oauth_provider: "google"
+  #   auth_required: true
+  #   scopes:
+  #     - "read"
+  #   timeout: 30000

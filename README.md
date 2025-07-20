@@ -235,10 +235,23 @@ Services can use these headers for:
 
 ## Docker Deployment
 
-### Quick Start with Memory Storage
+### Pre-built Image (Recommended)
+
+Use the pre-built Docker image from GitHub Container Registry:
 
 ```bash
-# Build image
+# Run with memory storage (development)
+docker run -p 8080:8080 \
+  -v $(pwd)/config.yaml:/app/config.yaml \
+  -e GOOGLE_CLIENT_ID="your-google-client-id" \
+  -e GOOGLE_CLIENT_SECRET="your-google-client-secret" \
+  ghcr.io/akshay5995/mcp-oauth-gateway:latest
+```
+
+### Build from Source
+
+```bash
+# Build image locally
 docker build -t mcp-oauth-gateway .
 
 # Run with memory storage (development)
@@ -273,7 +286,7 @@ docker run -p 8080:8080 \
   -e GOOGLE_CLIENT_ID="your-google-client-id" \
   -e GOOGLE_CLIENT_SECRET="your-google-client-secret" \
   -e REDIS_PASSWORD="mypassword" \
-  mcp-oauth-gateway
+  ghcr.io/akshay5995/mcp-oauth-gateway:latest
 ```
 
 ### Enterprise with Vault Storage
@@ -302,7 +315,7 @@ docker run -p 8080:8080 \
   -e GOOGLE_CLIENT_ID="your-google-client-id" \
   -e GOOGLE_CLIENT_SECRET="your-google-client-secret" \
   -e VAULT_TOKEN="myroot" \
-  mcp-oauth-gateway
+  ghcr.io/akshay5995/mcp-oauth-gateway:latest
 ```
 
 ### Docker Compose Example
@@ -312,7 +325,7 @@ docker run -p 8080:8080 \
 version: '3.8'
 services:
   mcp-gateway:
-    build: .
+    image: ghcr.io/akshay5995/mcp-oauth-gateway:latest
     ports:
       - "8080:8080"
     volumes:

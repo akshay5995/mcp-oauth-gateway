@@ -7,10 +7,11 @@ services:
   # MCP OAuth Gateway
   mcp-gateway:
     build: .
+    command: ["--config", "/app/config.yaml"]
     ports:
       - "8080:8080"
     volumes:
-      - ./config.yaml:/app/config.yaml
+      - ./config.docker.yaml:/app/config.yaml
     environment:
       # OAuth Provider (choose one)
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
