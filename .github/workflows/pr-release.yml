@@ -57,6 +57,10 @@ jobs:
         git commit -m "chore: bump version to ${RC_VERSION} [skip ci]" || echo "No changes to commit"
         git tag -a "v${RC_VERSION}" -m "Pre-release version ${RC_VERSION}"
     
+    - name: Push tag to trigger Docker build
+      run: |
+        git push origin "v${{ steps.version.outputs.RC_VERSION }}"
+    
     - name: Create GitHub pre-release
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
