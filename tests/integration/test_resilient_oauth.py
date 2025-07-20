@@ -190,9 +190,9 @@ class TestSingleProviderServiceBehavior:
                 provider = gateway._determine_provider_for_resource(
                     f"http://localhost:8080/{service}/mcp"
                 )
-                assert provider == "github", (
-                    f"Service {service} returned wrong provider: {provider}"
-                )
+                assert (
+                    provider == "github"
+                ), f"Service {service} returned wrong provider: {provider}"
 
     def test_provider_determination_performance(self, github_config):
         """Test that provider determination is consistently fast."""

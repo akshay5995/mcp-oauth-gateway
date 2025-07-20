@@ -1,6 +1,6 @@
 from fastmcp import Context, FastMCP
-from fastmcp.server.middleware import Middleware, MiddlewareContext
 from fastmcp.exceptions import ToolError
+from fastmcp.server.middleware import Middleware, MiddlewareContext
 
 
 class UserAuthMiddleware(Middleware):

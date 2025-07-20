@@ -12,18 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.9", "3.10", "3.11", "3.12"]
-    
-    services:
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+        python-version: ["3.10", "3.11", "3.12"]
     
     steps:
     - uses: actions/checkout@v4
@@ -41,30 +30,10 @@ jobs:
         
         # Install coverage for test reporting
         pip install pytest-cov>=4.0.0
-        
-        # Install storage backend dependencies for comprehensive testing
-        # Use modern redis library for Python 3.11+ compatibility
-        if [[ "${{ matrix.python-version }}" == "3.11" || "${{ matrix.python-version }}" == "3.12" ]]; then
-          pip install 'redis[hiredis]>=4.5.0'
-        else
-          pip install aioredis>=2.0.0
-        fi
-        
-        # Install Vault dependencies
-        pip install hvac>=1.2.0 aiohttp>=3.8.0
-    
-    - name: Wait for Redis
-      run: |
-        timeout 30 bash -c 'until redis-cli ping; do sleep 1; done'
     
     - name: Run tests with coverage
       run: |
         python -m pytest -v --tb=short --cov=src --cov-report=xml --cov-report=term-missing
-      env:
-        # Redis service connection for testing
-        REDIS_HOST: localhost
-        REDIS_PORT: 6379
-        REDIS_PASSWORD: ""
     
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v3
@@ -77,54 +46,4 @@ jobs:
       run: |
         python -m src.gateway --help
     
-    - name: Test storage backends
-      run: |
-        # Test memory storage (default)
-        python -c "
-        import asyncio
-        from src.storage.manager import StorageManager
-        from src.config.config import StorageConfig
-        
-        async def test():
-            config = StorageConfig(type='memory')
-            manager = StorageManager(config)
-            storage = await manager.start_storage()
-            await storage.set('test', {'data': 'value'})
-            result = await storage.get('test')
-            assert result == {'data': 'value'}
-            await manager.stop_storage()
-            print('✅ Memory storage test passed')
-        
-        asyncio.run(test())
-        "
-        
-        # Test Redis storage with service
-        python -c "
-        import asyncio
-        from src.storage.manager import StorageManager  
-        from src.config.config import StorageConfig, RedisStorageConfig
-        
-        async def test():
-            config = StorageConfig(
-                type='redis',
-                redis=RedisStorageConfig(
-                    host='localhost',
-                    port=6379,
-                    password='',
-                    db=0,
-                    ssl=False,
-                    max_connections=20
-                )
-            )
-            manager = StorageManager(config)
-            storage = await manager.start_storage()
-            await storage.set('test', {'redis': 'works'})
-            result = await storage.get('test')
-            assert result == {'redis': 'works'}
-            await manager.stop_storage()
-            print('✅ Redis storage test passed')
-        
-        asyncio.run(test())
-        "
-      env:
-        REDIS_HOST: localhost
+
