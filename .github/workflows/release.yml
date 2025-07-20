@@ -38,8 +38,49 @@ jobs:
         git config --global user.email "github-actions[bot]@users.noreply.github.com"
     
     - name: Run semantic release
+      id: release
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         semantic-release version
         semantic-release publish
+        
+        # Get the new version for Docker tagging
+        NEW_VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
+        echo "NEW_VERSION=${NEW_VERSION}" >> $GITHUB_OUTPUT
+    
+    - name: Set up Docker Buildx
+      if: steps.release.outputs.NEW_VERSION != ''
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Log in to Container Registry
+      if: steps.release.outputs.NEW_VERSION != ''
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Extract Docker metadata
+      if: steps.release.outputs.NEW_VERSION != ''
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ghcr.io/${{ github.repository }}
+        tags: |
+          type=semver,pattern={{version}},value=v${{ steps.release.outputs.NEW_VERSION }}
+          type=semver,pattern={{major}}.{{minor}},value=v${{ steps.release.outputs.NEW_VERSION }}
+          type=semver,pattern={{major}},value=v${{ steps.release.outputs.NEW_VERSION }}
+          type=raw,value=latest,enable={{is_default_branch}}
+    
+    - name: Build and push Docker image
+      if: steps.release.outputs.NEW_VERSION != ''
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
