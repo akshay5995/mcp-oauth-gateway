@@ -4,8 +4,10 @@ import base64
 import hashlib
 import logging
 import secrets
-from typing import Dict, Optional, Tuple
+from dataclasses import asdict
+from typing import Optional, Tuple
 
+from ..storage.base import SessionStorage
 from .client_registry import ClientRegistry
 from .models import (
     AuthorizationCode,
@@ -25,16 +27,19 @@ logger = logging.getLogger(__name__)
 class OAuthServer:
     """OAuth 2.1 Authorization Server."""
 
-    def __init__(self, secret_key: str, issuer: str):
+    def __init__(
+        self,
+        secret_key: str,
+        issuer: str,
+        session_storage: SessionStorage,
+        client_registry: ClientRegistry,
+        token_manager: TokenManager,
+    ):
         self.secret_key = secret_key
         self.issuer = issuer
-        self.client_registry = ClientRegistry()
-        self.token_manager = TokenManager(secret_key, issuer)
-
-        # In-memory storage (use database in production)
-        self.authorization_codes: Dict[str, AuthorizationCode] = {}
-        self.oauth_states: Dict[str, OAuthState] = {}
-        self.user_sessions: Dict[str, UserInfo] = {}  # user_id -> UserInfo
+        self.session_storage = session_storage
+        self.client_registry = client_registry
+        self.token_manager = token_manager
 
     async def handle_authorize(
         self, request: AuthorizeRequest
@@ -42,18 +47,18 @@ class OAuthServer:
         """Handle authorization endpoint request."""
         try:
             # Validate client
-            client = self.client_registry.get_client(request.client_id)
+            client = await self.client_registry.get_client(request.client_id)
             if not client:
                 return "", ErrorResponse("invalid_client", "Client not found")
 
             # Validate redirect URI
-            if not self.client_registry.validate_redirect_uri(
+            if not await self.client_registry.validate_redirect_uri(
                 request.client_id, request.redirect_uri
             ):
                 return "", ErrorResponse("invalid_request", "Invalid redirect URI")
 
             # Validate response type
-            if not self.client_registry.validate_response_type(
+            if not await self.client_registry.validate_response_type(
                 request.client_id, request.response_type
             ):
                 return "", ErrorResponse(
@@ -91,7 +96,9 @@ class OAuthServer:
                 provider="",  # Will be set by provider manager
             )
 
-            self.oauth_states[provider_state] = oauth_state
+            await self.session_storage.set(
+                f"oauth_state:{provider_state}", asdict(oauth_state), ttl=600
+            )  # 10 minutes
 
             # Return state for provider authentication
             return provider_state, None
@@ -123,11 +130,11 @@ class OAuthServer:
         # Authenticate client
         client = None
         if request.client_secret:
-            client = self.client_registry.authenticate_client(
+            client = await self.client_registry.authenticate_client(
                 request.client_id, request.client_secret
             )
         else:
-            client = self.client_registry.get_client(request.client_id)
+            client = await self.client_registry.get_client(request.client_id)
 
         if not client:
             return None, ErrorResponse("invalid_client", "Client authentication failed")
@@ -136,12 +143,13 @@ class OAuthServer:
         if not request.code:
             return None, ErrorResponse("invalid_request", "Authorization code required")
 
-        auth_code = self.authorization_codes.get(request.code)
-        if not auth_code:
+        auth_code_data = await self.session_storage.get(f"auth_code:{request.code}")
+        if not auth_code_data:
             return None, ErrorResponse("invalid_grant", "Invalid authorization code")
 
+        auth_code = AuthorizationCode(**auth_code_data)
         if auth_code.is_expired():
-            del self.authorization_codes[request.code]
+            await self.session_storage.delete(f"auth_code:{request.code}")
             return None, ErrorResponse("invalid_grant", "Authorization code expired")
 
         if auth_code.client_id != request.client_id:
@@ -163,8 +171,8 @@ class OAuthServer:
                 return None, ErrorResponse("invalid_grant", "Invalid code verifier")
 
         # Get user info
-        user = self.user_sessions.get(auth_code.user_id)
-        if not user:
+        user_data = await self.session_storage.get(f"user_session:{auth_code.user_id}")
+        if not user_data:
             return None, ErrorResponse("invalid_grant", "User session not found")
 
         # Create tokens
@@ -172,9 +180,9 @@ class OAuthServer:
         logger.info("Creating access token")
 
         # Get user info for token creation
-        user_info = self.get_user_info(auth_code.user_id)
+        user_info = await self.get_user_info(auth_code.user_id)
 
-        access_token = self.token_manager.create_access_token(
+        access_token = await self.token_manager.create_access_token(
             client_id=request.client_id,
             user_id=auth_code.user_id,
             scope=auth_code.scope,
@@ -182,14 +190,14 @@ class OAuthServer:
             user_info=user_info,
         )
 
-        refresh_token = self.token_manager.create_refresh_token(
+        refresh_token = await self.token_manager.create_refresh_token(
             client_id=request.client_id,
             user_id=auth_code.user_id,
             scope=auth_code.scope,
         )
 
         # Clean up authorization code
-        del self.authorization_codes[request.code]
+        await self.session_storage.delete(f"auth_code:{request.code}")
 
         return (
             TokenResponse(
@@ -211,7 +219,7 @@ class OAuthServer:
         if not request.client_secret:
             return None, ErrorResponse("invalid_client", "Client secret required")
 
-        client = self.client_registry.authenticate_client(
+        client = await self.client_registry.authenticate_client(
             request.client_id, request.client_secret
         )
         if not client:
@@ -222,7 +230,9 @@ class OAuthServer:
         if not request.refresh_token:
             return None, ErrorResponse("invalid_request", "Refresh token required")
 
-        refresh_token = self.token_manager.validate_refresh_token(request.refresh_token)
+        refresh_token = await self.token_manager.validate_refresh_token(
+            request.refresh_token
+        )
         if not refresh_token:
             return None, ErrorResponse("invalid_grant", "Invalid refresh token")
 
@@ -230,10 +240,10 @@ class OAuthServer:
             return None, ErrorResponse("invalid_grant", "Refresh token client mismatch")
 
         # Get user info for token creation
-        user_info = self.get_user_info(refresh_token.user_id)
+        user_info = await self.get_user_info(refresh_token.user_id)
 
         # Create new access token
-        access_token = self.token_manager.create_access_token(
+        access_token = await self.token_manager.create_access_token(
             client_id=refresh_token.client_id,
             user_id=refresh_token.user_id,
             scope=refresh_token.scope,
@@ -244,13 +254,13 @@ class OAuthServer:
         # Optionally rotate refresh token (recommended for public clients)
         new_refresh_token = request.refresh_token
         if client.token_endpoint_auth_method == "none":  # Public client
-            new_refresh_token = self.token_manager.create_refresh_token(
+            new_refresh_token = await self.token_manager.create_refresh_token(
                 client_id=refresh_token.client_id,
                 user_id=refresh_token.user_id,
                 scope=refresh_token.scope,
             )
             # Revoke old refresh token
-            self.token_manager.revoke_refresh_token(request.refresh_token)
+            await self.token_manager.revoke_refresh_token(request.refresh_token)
 
         return (
             TokenResponse(
@@ -273,7 +283,7 @@ class OAuthServer:
     ) -> Tuple[Optional[dict], Optional[ErrorResponse]]:
         """Handle client registration request."""
         try:
-            client = self.client_registry.register_client(request)
+            client = await self.client_registry.register_client(request)
 
             return {
                 "client_id": client.client_id,
@@ -293,7 +303,9 @@ class OAuthServer:
         except Exception as e:
             return None, ErrorResponse("server_error", str(e))
 
-    def create_authorization_code(self, user_id: str, oauth_state: OAuthState) -> str:
+    async def create_authorization_code(
+        self, user_id: str, oauth_state: OAuthState
+    ) -> str:
         """Create authorization code after user authentication."""
         code = secrets.token_urlsafe(32)
 
@@ -308,31 +320,42 @@ class OAuthServer:
             code_challenge_method=oauth_state.code_challenge_method,
         )
 
-        self.authorization_codes[code] = auth_code
+        await self.session_storage.set(
+            f"auth_code:{code}", asdict(auth_code), ttl=600
+        )  # 10 minutes
 
         return code
 
-    def get_oauth_state(self, state: str) -> Optional[OAuthState]:
+    async def get_oauth_state(self, state: str) -> Optional[OAuthState]:
         """Get OAuth state."""
-        oauth_state = self.oauth_states.get(state)
-        if oauth_state and oauth_state.is_expired():
-            del self.oauth_states[state]
+        oauth_state_data = await self.session_storage.get(f"oauth_state:{state}")
+        if not oauth_state_data:
+            return None
+
+        oauth_state = OAuthState(**oauth_state_data)
+        if oauth_state.is_expired():
+            await self.session_storage.delete(f"oauth_state:{state}")
             return None
         return oauth_state
 
-    def store_user_session(self, user_id: str, user_info: UserInfo) -> None:
+    async def store_user_session(self, user_id: str, user_info: UserInfo) -> None:
         """Store user session."""
-        self.user_sessions[user_id] = user_info
+        await self.session_storage.set(
+            f"user_session:{user_id}", asdict(user_info), ttl=3600
+        )  # 1 hour
 
-    def get_user_info(self, user_id: str) -> Optional[UserInfo]:
+    async def get_user_info(self, user_id: str) -> Optional[UserInfo]:
         """Get user info by ID."""
-        return self.user_sessions.get(user_id)
+        user_data = await self.session_storage.get(f"user_session:{user_id}")
+        if not user_data:
+            return None
+        return UserInfo(**user_data)
 
-    def validate_access_token(
+    async def validate_access_token(
         self, token: str, resource: Optional[str] = None
     ) -> Optional[dict]:
         """Validate access token."""
-        return self.token_manager.validate_access_token(token, resource)
+        return await self.token_manager.validate_access_token(token, resource)
 
     def _generate_state(self) -> str:
         """Generate state parameter."""
@@ -349,25 +372,8 @@ class OAuthServer:
 
         return challenge == code_challenge
 
-    def cleanup_expired_data(self) -> None:
+    async def cleanup_expired_data(self) -> None:
         """Clean up expired data."""
-        # Clean expired authorization codes
-        expired_codes = [
-            code
-            for code, auth_code in self.authorization_codes.items()
-            if auth_code.is_expired()
-        ]
-        for code in expired_codes:
-            del self.authorization_codes[code]
-
-        # Clean expired OAuth states
-        expired_states = [
-            state
-            for state, oauth_state in self.oauth_states.items()
-            if oauth_state.is_expired()
-        ]
-        for state in expired_states:
-            del self.oauth_states[state]
-
-        # Clean expired tokens
-        self.token_manager.cleanup_expired_tokens()
+        # The storage backends handle TTL automatically,
+        # but we can still trigger token cleanup
+        await self.token_manager.cleanup_expired_tokens()

@@ -1,0 +1,4 @@
+skips:
+  - B105  # hardcoded_password_string - OAuth protocol constants
+  - B106  # hardcoded_password_funcarg - OAuth protocol constants  
+  - B104  # hardcoded_bind_all_interfaces - Intentional for containers

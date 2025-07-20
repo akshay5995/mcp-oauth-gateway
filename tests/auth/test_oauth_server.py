@@ -12,19 +12,20 @@ from src.auth.models import (
 )
 from tests.utils.crypto_helpers import create_invalid_code_challenge, generate_pkce_pair
 
+# Mark all async functions in this module as asyncio tests
+pytestmark = pytest.mark.asyncio
+
 
 class TestOAuthServer:
     """Test cases for OAuthServer."""
 
-    def test_oauth_server_initialization(self, oauth_server):
+    async def test_oauth_server_initialization(self, oauth_server):
         """Test OAuth server initializes correctly."""
         assert oauth_server.secret_key == "test-secret-key-for-testing-only"
         assert oauth_server.issuer == "http://localhost:8080"
         assert oauth_server.client_registry is not None
         assert oauth_server.token_manager is not None
-        assert isinstance(oauth_server.authorization_codes, dict)
-        assert isinstance(oauth_server.oauth_states, dict)
-        assert isinstance(oauth_server.user_sessions, dict)
+        assert oauth_server.session_storage is not None
 
     @pytest.mark.asyncio
     async def test_handle_authorize_invalid_client(self, oauth_server):
@@ -56,7 +57,9 @@ class TestOAuthServer:
             response_types=["code"],
         )
 
-        client_info = oauth_server.client_registry.register_client(registration_request)
+        client_info = await oauth_server.client_registry.register_client(
+            registration_request
+        )
 
         # Create authorization request
         request = AuthorizeRequest(
@@ -77,7 +80,7 @@ class TestOAuthServer:
         assert len(provider_state) > 0
 
         # Check that OAuth state was stored
-        oauth_state = oauth_server.oauth_states.get(provider_state)
+        oauth_state = await oauth_server.get_oauth_state(provider_state)
         assert oauth_state is not None
         assert oauth_state.client_id == client_info.client_id
         assert oauth_state.redirect_uri == "http://localhost:8080/callback"
@@ -95,7 +98,9 @@ class TestOAuthServer:
             response_types=["code"],
         )
 
-        client_info = oauth_server.client_registry.register_client(registration_request)
+        client_info = await oauth_server.client_registry.register_client(
+            registration_request
+        )
 
         # Create authorization request with invalid redirect URI
         request = AuthorizeRequest(
@@ -126,7 +131,9 @@ class TestOAuthServer:
             response_types=["code"],
         )
 
-        client_info = oauth_server.client_registry.register_client(registration_request)
+        client_info = await oauth_server.client_registry.register_client(
+            registration_request
+        )
 
         # Create and store OAuth state and authorization code
         code_verifier, code_challenge = generate_pkce_pair()
@@ -153,10 +160,10 @@ class TestOAuthServer:
             provider="github",
         )
         user_id = "github:test_user_123"
-        oauth_server.store_user_session(user_id, user_info)
+        await oauth_server.store_user_session(user_id, user_info)
 
         # Create authorization code
-        auth_code = oauth_server.create_authorization_code(user_id, oauth_state)
+        auth_code = await oauth_server.create_authorization_code(user_id, oauth_state)
 
         # Create token request
         token_request = TokenRequest(
@@ -189,7 +196,9 @@ class TestOAuthServer:
             response_types=["code"],
         )
 
-        client_info = oauth_server.client_registry.register_client(registration_request)
+        client_info = await oauth_server.client_registry.register_client(
+            registration_request
+        )
 
         # Create token request with invalid code
         token_request = TokenRequest(
@@ -218,7 +227,9 @@ class TestOAuthServer:
             response_types=["code"],
         )
 
-        client_info = oauth_server.client_registry.register_client(registration_request)
+        client_info = await oauth_server.client_registry.register_client(
+            registration_request
+        )
 
         # Create and store OAuth state and authorization code
         code_verifier, code_challenge = generate_pkce_pair()
@@ -245,10 +256,10 @@ class TestOAuthServer:
             provider="github",
         )
         user_id = "github:test_user_123"
-        oauth_server.store_user_session(user_id, user_info)
+        await oauth_server.store_user_session(user_id, user_info)
 
         # Create authorization code
-        auth_code = oauth_server.create_authorization_code(user_id, oauth_state)
+        auth_code = await oauth_server.create_authorization_code(user_id, oauth_state)
 
         # Create token request with wrong code verifier
         token_request = TokenRequest(
@@ -267,7 +278,7 @@ class TestOAuthServer:
         assert error.error == "invalid_grant"
         assert "Invalid code verifier" in error.error_description
 
-    def test_create_authorization_code(self, oauth_server):
+    async def test_create_authorization_code(self, oauth_server):
         """Test authorization code creation."""
         # Create OAuth state
         from src.auth.models import OAuthState
@@ -286,13 +297,20 @@ class TestOAuthServer:
 
         user_id = "github:test_user_123"
 
-        auth_code = oauth_server.create_authorization_code(user_id, oauth_state)
+        auth_code = await oauth_server.create_authorization_code(user_id, oauth_state)
 
         assert auth_code is not None
         assert len(auth_code) > 0
-        assert auth_code in oauth_server.authorization_codes
 
-        stored_code = oauth_server.authorization_codes[auth_code]
+        # Verify the code was stored by checking if we can retrieve it
+        stored_code_data = await oauth_server.session_storage.get(
+            f"auth_code:{auth_code}"
+        )
+        assert stored_code_data is not None
+
+        from src.auth.models import AuthorizationCode
+
+        stored_code = AuthorizationCode(**stored_code_data)
         assert stored_code.client_id == "test_client"
         assert stored_code.user_id == user_id
         assert stored_code.scope == "read write"
@@ -300,14 +318,14 @@ class TestOAuthServer:
         assert stored_code.code_challenge_method == "S256"
         assert stored_code.resource == "http://localhost:8080/calculator"
 
-    def test_verify_pkce_success(self, oauth_server):
+    async def test_verify_pkce_success(self, oauth_server):
         """Test successful PKCE verification."""
         code_verifier, code_challenge = generate_pkce_pair()
 
         result = oauth_server._verify_pkce(code_verifier, code_challenge)
         assert result is True
 
-    def test_verify_pkce_failure(self, oauth_server):
+    async def test_verify_pkce_failure(self, oauth_server):
         """Test failed PKCE verification."""
         code_verifier, _ = generate_pkce_pair()
         wrong_challenge = create_invalid_code_challenge()
@@ -315,7 +333,7 @@ class TestOAuthServer:
         result = oauth_server._verify_pkce(code_verifier, wrong_challenge)
         assert result is False
 
-    def test_verify_pkce_with_different_verifier(self, oauth_server):
+    async def test_verify_pkce_with_different_verifier(self, oauth_server):
         """Test PKCE verification with different verifier."""
         code_verifier1, code_challenge = generate_pkce_pair()
         code_verifier2, _ = generate_pkce_pair()  # Different verifier

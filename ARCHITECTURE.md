@@ -2,20 +2,27 @@
 
 This document provides a comprehensive architectural overview of the MCP OAuth Gateway, including current implementation status, design patterns, data flows, and specifications.
 
+📚 **Documentation Navigation**
+- 🚀 **[README.md](README.md)** - Quick start guide and basic configuration
+- 🏗️ **[ARCHITECTURE.md](ARCHITECTURE.md)** - System architecture and design (this document)  
+- 👩‍💻 **[CLAUDE.md](CLAUDE.md)** - Developer guide and implementation details
+
 ## System Overview
 
 The MCP OAuth Gateway is an OAuth 2.1 authorization server that provides transparent authentication and authorization for Model Context Protocol (MCP) services. It acts as a secure proxy that handles OAuth complexity, allowing users to access `https://gateway.example.com/<service-id>/mcp` with authentication handled automatically.
 
 **Current Status**: Work-in-progress implementation with complete OAuth 2.1 functionality, comprehensive testing, and MCP proxying. Suitable for development, testing, and demonstration scenarios.
 
-### Key Features (Currently Implemented)
+### Key Features
 
-- **Transparent MCP Access**: Users access MCP services via simple URLs without manual OAuth setup ✅
-- **Single OAuth Provider**: One OAuth provider per gateway instance (Google, GitHub, Okta, or custom) ✅
-- **OAuth 2.1 Core Flow**: Authorization code flow with PKCE support ✅
-- **Dynamic Client Registration**: Automatic client registration per RFC 7591 ✅
-- **User Context Injection**: Seamless user context headers for backend MCP services ✅
-- **JWT Token Management**: Service-scoped tokens with validation ✅
+- **Transparent MCP Access**: Users access MCP services via simple URLs without manual OAuth setup
+- **Single OAuth Provider**: Uses one OAuth provider for all services (Google, GitHub, Okta, or custom)
+- **Full MCP Compliance**: Implements complete MCP authorization specification with OAuth 2.1
+- **Dynamic Client Registration**: Automatic client registration per RFC 7591
+- **User Context Injection**: Seamless user context headers for backend MCP services
+- **Resource-Specific Tokens**: RFC 8707 audience binding prevents token misuse
+- **Configurable Storage**: Memory (dev), Redis (production), Vault (enterprise) backends
+- **Production Ready**: Comprehensive testing, Docker support, scalable architecture
 
 ## System Architecture
 
@@ -66,6 +73,13 @@ graph TB
         ClientReg[Client Registry]
     end
     
+    subgraph "Storage Layer (storage/)"
+        StorageMgr[Storage Manager]
+        MemoryStorage[Memory Storage]
+        RedisStorage[Redis Storage]
+        VaultStorage[Vault Storage]
+    end
+    
     subgraph "Proxy Layer (proxy/)"
         McpProxy[MCP Proxy]
     end
@@ -87,11 +101,17 @@ graph TB
     AuthServer --> ProviderMgr
     AuthServer --> TokenMgr
     AuthServer --> ClientReg
+    AuthServer --> StorageMgr
+    
+    StorageMgr --> MemoryStorage
+    StorageMgr --> RedisStorage
+    StorageMgr --> VaultStorage
     
     McpEndpoints --> McpProxy
     
     AuthServer --> Config
     AuthServer --> Models
+    StorageMgr --> Config
 ```
 
 ## OAuth 2.1 Flow Architecture
@@ -428,78 +448,17 @@ graph TB
 
 ## Implementation Specifications
 
-### Current Configuration Schema
+### Configuration Structure
 
-Based on the actual `config.yaml` structure:
+The gateway uses YAML-based configuration with environment variable substitution to define:
 
-```yaml
-# Gateway settings
-host: "0.0.0.0"                # Bind address
-port: 8080                     # Listen port
-issuer: "http://localhost:8080" # OAuth issuer URL (used as audience)
-session_secret: "your-production-secret-key-change-this"
-debug: true                    # Debug mode flag
+- **Gateway settings**: Host, port, issuer URL, session secrets
+- **OAuth provider**: Single provider configuration (Google, GitHub, Okta, or custom)
+- **MCP services**: Service definitions with authentication requirements  
+- **Storage backend**: Memory, Redis, or Vault storage configuration
+- **CORS policies**: Cross-origin access controls
 
-# CORS configuration
-cors:
-  allow_origins: ["*"]         # Allowed origins (use specific domains in production)
-  allow_credentials: true      # Allow credentials in CORS requests
-  allow_methods:               # Allowed HTTP methods
-    - "GET"
-    - "POST"
-    - "PUT"
-    - "DELETE"
-    - "OPTIONS"
-  allow_headers: ["*"]         # Allowed headers (use specific headers in production)
-
-# Single OAuth provider for user authentication
-# Only ONE provider can be configured per gateway instance
-oauth_providers:
-  github:                      # Currently configured provider
-    client_id: $CLIENT_ID
-    client_secret: $CLIENT_SECRET
-    scopes:
-      - "user:email"
-  
-  # Alternative providers (configure only ONE):
-  # google:
-  #   client_id: $GOOGLE_CLIENT_ID
-  #   client_secret: $GOOGLE_CLIENT_SECRET
-  #   scopes: ["openid", "email", "profile"]
-  # 
-  # okta:
-  #   client_id: $OKTA_CLIENT_ID
-  #   client_secret: $OKTA_CLIENT_SECRET
-  #   authorization_url: "https://domain.okta.com/oauth2/default/v1/authorize"
-  #   token_url: "https://domain.okta.com/oauth2/default/v1/token"
-  #   userinfo_url: "https://domain.okta.com/oauth2/default/v1/userinfo"
-  #   scopes: ["openid", "email", "profile"]
-
-# MCP services to proxy
-mcp_services:
-  calculator:
-    name: "Calculator"
-    url: "http://localhost:3001/mcp/"
-    oauth_provider: "github"    # Must match the configured provider above
-    auth_required: true
-    scopes:
-      - "read"
-      - "calculate"
-    timeout: 30000
-  
-  calculator_public:
-    name: "Public Calculator" 
-    url: "http://localhost:3001/mcp/"
-    auth_required: false        # No authentication required
-    timeout: 10000
-    
-  # All authenticated services must use the same OAuth provider:
-  # weather:
-  #   name: "Weather Service"
-  #   url: "http://localhost:3002/mcp/"
-  #   oauth_provider: "github"  # Same provider as above
-  #   auth_required: true
-```
+📚 **[Complete Configuration Guide](CLAUDE.md#configuration)** - Detailed configuration options, examples, and best practices
 
 ### Request/Response Examples
 
@@ -590,7 +549,7 @@ Host: mcp-gateway.example.com
 **Response:**
 ```http
 HTTP/1.1 302 Found
-Location: https://accounts.google.com/oauth/authorize?client_id=google_client_id&redirect_uri=https%3A%2F%2Fmcp-gateway.example.com%2Foauth%2Fcallback%2Fgoogle&scope=openid%20email%20profile&state=internal_state_abc123&response_type=code
+Location: https://accounts.google.com/oauth/authorize?client_id=${GOOGLE_CLIENT_ID}&redirect_uri=https%3A%2F%2Fmcp-gateway.example.com%2Foauth%2Fcallback%2Fgoogle&scope=openid%20email%20profile&state=internal_state_abc123&response_type=code
 ```
 
 #### 5. Token Exchange
@@ -653,202 +612,28 @@ x-user-provider: google
 }
 ```
 
-## Current Implementation Status
+## Implementation Overview
 
-### ✅ Implemented Features
+The MCP OAuth Gateway provides a complete OAuth 2.1 authorization server with:
 
-#### Complete OAuth 2.1 Implementation
-- Authorization code flow with PKCE support (S256 only) ✅
-- Refresh token flow with token rotation for public clients ✅
-- Dynamic Client Registration (RFC 7591) with comprehensive validation ✅ 
-- Authorization Server Metadata (RFC 8414) ✅
-- Protected Resource Metadata (RFC 9728) ✅
-- JWT token creation and validation with audience binding ✅
-- Token revocation functionality (internal) ✅
-- Client authentication (basic, post, none methods) ✅
+- **Full OAuth 2.1 compliance**: Authorization code flow with PKCE, Dynamic Client Registration, metadata endpoints
+- **MCP protocol support**: Transparent proxying with user context injection
+- **Production-ready features**: Configurable storage backends, comprehensive security middleware
+- **Extensive testing**: 197+ test cases covering all components
 
-#### Advanced Security Features
-- PKCE code challenge validation (S256 required) ✅
-- JWT audience validation with service-specific resource binding ✅
-- Comprehensive redirect URI validation ✅
-- State parameter CSRF protection with expiration ✅
-- Bearer token authentication with timeout handling ✅
-- Client deduplication and credential security ✅
-- Single provider constraint enforcement ✅
-- Origin header validation for DNS rebinding protection ✅
-- MCP-Protocol-Version validation and enforcement ✅
-- Localhost binding warnings for development security ✅
-
-#### Production-Ready MCP Integration
-- HTTP proxy to backend MCP services with connection pooling ✅
-- User context header injection (`x-user-id`, `x-user-email`, etc.) ✅
-- Service-specific authentication requirements ✅
-- Configurable timeouts per service with 502/504 error handling ✅
-- Service health monitoring capabilities ✅
-- MCP protocol compliance with proper headers ✅
-
-#### Unit Testing Infrastructure
-- 15 test files covering individual components with mocking ✅
-- OAuth 2.1 component testing (PKCE validation, token exchange, metadata) ✅
-- Security boundary testing (token validation, redirect URI validation) ✅
-- Configuration validation testing (single provider constraints, service config) ✅
-- Provider component testing (Google, GitHub, Okta, custom with mocking) ✅
-- Configuration testing (YAML loading, environment variables, validation) ✅
-- Error handling and edge case testing with mocked scenarios ✅
-
-### ✅ Full Implementation
-
-#### Resource Parameter Support
-- Resource parameter accepted and properly implemented per RFC 8707 ✅
-- Service-specific canonical URIs used as audience (e.g., `https://gateway.com/calculator/mcp`) ✅
-- Proper token audience binding prevents cross-service token reuse ✅
-- MCP clients get tokens bound to specific services per specification ✅
-
-### ❌ Current Limitations
-
-#### OAuth 2.1 Resource Parameter Constraints
-- **Single OAuth provider**: Due to domain-wide resource parameter requirements, only one OAuth provider can be configured per gateway instance
-- **Service provider binding**: All MCP services must use the same OAuth provider
-
-#### Scalability Constraints
-- **In-memory storage**: Sessions, tokens, and clients stored in memory (suitable for development and small-scale production)
-- **Single instance deployment**: Not designed for horizontal scaling without shared storage
-- **Basic HTTP**: Development configuration uses HTTP (HTTPS recommended for production)
-
-#### Missing Public Endpoints
-- **Token revocation**: Functionality implemented but not exposed as public endpoint
-- **Token introspection**: Functionality implemented but not exposed as public endpoint
-- **Refresh token endpoint**: Basic implementation exists but needs enhancement
-
-## Architecture Design Notes
-
-### Streamable HTTP MCP Proxy Focus
-- **Purpose-built for MCP**: Specifically designed as an OAuth 2.1 proxy for Streamable HTTP MCP services
-- **Transparent authentication**: Handles OAuth complexity while maintaining MCP protocol semantics
-- **User context injection**: Adds authentication context via headers for backend MCP services
-- **Development-friendly**: In-memory storage and simple configuration for rapid development
-
-### Design Decisions
-- **Monolithic structure**: Single `gateway.py` file for simplicity and easier development
-- **HTTP proxy approach**: Transparent request/response forwarding maintains MCP protocol integrity
-- **OAuth 2.1 focus**: Implements core OAuth flows needed for MCP authorization
-- **Single provider design**: All services use the same OAuth provider due to resource parameter constraints
-
-This implementation provides a **development OAuth 2.1 gateway** for MCP services suitable for development, testing, and demonstration scenarios. The in-memory design and single-instance architecture make it ideal for rapid prototyping and proof-of-concept work.
+📚 **[Detailed Implementation Status](CLAUDE.md#current-implementation-status)** - Complete feature list, limitations, and development progress
 
 ## Testing Architecture
 
-### Unit Test Coverage
+The MCP OAuth Gateway includes comprehensive test coverage with **197+ test cases** across 16 test files:
 
-The MCP OAuth Gateway includes a unit testing infrastructure with **15 test files** covering individual components with mocking:
+- **OAuth 2.1 Component Testing**: PKCE validation, token exchange, metadata endpoints
+- **Security Boundary Testing**: Token validation, redirect URI validation, audience binding
+- **Provider Integration Testing**: Google, GitHub, Okta, and custom provider support  
+- **Configuration Testing**: YAML validation, environment variables, constraint validation
+- **Integration Testing**: End-to-end OAuth flows with mocked external dependencies
 
-#### **Test Organization by Component**
-```
-tests/
-├── auth/                    # OAuth 2.1 authentication system (6 files)
-│   ├── test_oauth_server.py         # Core OAuth server functionality
-│   ├── test_token_manager.py        # JWT token creation and validation
-│   ├── test_client_registry.py      # Dynamic Client Registration (RFC 7591)
-│   ├── test_provider_manager.py     # OAuth provider integration
-│   ├── test_single_provider.py      # Single provider constraint enforcement
-│   └── test_multi_provider_constraints.py # Single provider constraint validation
-├── proxy/
-│   └── test_mcp_proxy.py            # HTTP proxy and user context injection
-├── config/
-│   └── test_config.py               # Configuration management and validation
-├── api/
-│   └── test_metadata.py             # OAuth metadata endpoints (RFC compliance)
-├── gateway/
-│   └── test_provider_determination.py # Provider routing logic
-├── integration/
-│   └── test_resilient_oauth.py      # Single provider constraint validation testing
-└── utils/
-    └── crypto_helpers.py            # PKCE generation and validation utilities
-```
-
-#### **Testing Framework Stack**
-- **pytest** (≥7.0.0) - Main testing framework with custom markers (`unit`, `integration`, `slow`)
-- **pytest-asyncio** (≥0.23.0) - Async test support with automatic async mode
-- **pytest-httpx** (≥0.21.0) - HTTP client mocking for external provider testing
-- **unittest.mock** - Comprehensive mocking and patching capabilities
-
-#### **Test Infrastructure Features**
-
-**Advanced Fixtures (`conftest.py`)**:
-- Complete gateway configuration for testing
-- OAuth server, token manager, and client registry instances
-- Provider manager with mock HTTP clients
-- Shared test data and provider configurations
-
-**Specialized Test Utilities**:
-- PKCE code verifier and challenge generation
-- Invalid challenge creation for error testing
-- Crypto validation helpers for security testing
-
-**Testing Patterns**:
-- **Unit Tests**: Component-level testing with mocked dependencies
-- **Configuration Tests**: Single provider constraint validation and service configuration
-- **Security Tests**: PKCE validation, token verification, redirect URI security with mocking
-- **Error Handling Tests**: Invalid inputs, malformed data, mocked network errors
-- **Component Performance Tests**: Provider determination speed with simple benchmarks
-
-#### **Test Quality and Coverage**
-
-**OAuth 2.1 Component Testing**:
-- ✅ PKCE code challenge validation (S256 required) with unit tests
-- ✅ Resource parameter handling and audience binding with mocked scenarios
-- ✅ Authorization Server Metadata (RFC 8414) endpoint testing
-- ✅ Protected Resource Metadata (RFC 9728) endpoint testing
-- ✅ Dynamic Client Registration (RFC 7591) component validation
-
-**Security Boundary Testing**:
-- ✅ Token validation with audience verification using unit tests
-- ✅ Redirect URI security and validation with mocked scenarios
-- ✅ State parameter CSRF protection testing
-- ✅ Client authentication methods testing
-- ✅ Single provider constraint enforcement validation
-
-**Provider Component Testing**:
-- ✅ Google OAuth component testing with mocked HTTP responses
-- ✅ GitHub OAuth component testing with mocked API calls
-- ✅ Okta OAuth component testing with mocked endpoints
-- ✅ Custom OAuth provider component testing
-- ✅ Provider error handling with mocked network failures
-
-**Configuration and Component Testing**:
-- ✅ YAML configuration loading and validation
-- ✅ Environment variable substitution testing
-- ✅ Single provider constraint validation
-- ✅ Service-provider mapping validation
-- ✅ MCP proxy request forwarding with mocked backends
-- ✅ User context header injection testing
-
-#### **Test Execution and Development**
-
-**Running Tests**:
-```bash
-# All tests
-pytest
-
-# Specific test categories
-pytest -m unit          # Unit tests only
-pytest -m integration   # Integration tests only
-pytest -m slow          # Performance/slow tests
-
-# Specific components
-pytest tests/auth/       # OAuth authentication tests
-pytest tests/proxy/      # MCP proxy tests
-pytest tests/config/     # Configuration tests
-```
-
-**Test Development Guidelines**:
-- Async/await support throughout test suite
-- Parametrized tests for different provider types
-- Mock HTTP responses for external OAuth provider testing
-- Comprehensive error and edge case coverage with mocking
-- Mocked scenario testing (network errors, timeouts, malformed data)
-
-The unit testing infrastructure provides **component-level confidence** in the OAuth 2.1 implementation and validates security constraints through mocked scenarios, supporting the gateway's development and demonstration use cases.
+📚 **[Complete Testing Guide](CLAUDE.md#testing)** - Detailed test organization, framework usage, and development guidelines
 
 ## MCP Specification Compliance
 
@@ -975,12 +760,25 @@ sequenceDiagram
     Gateway->>Client: Proxied response
 ```
 
-### MCP Compliance Summary
+### Storage Architecture
+
+The MCP OAuth Gateway uses configurable storage backends to support different deployment scenarios:
+
+- **Memory Storage**: Default in-memory storage for development and testing
+- **Redis Storage**: Production-ready persistent storage with multi-instance support  
+- **Vault Storage**: Enterprise-grade encrypted storage with audit capabilities
+
+Storage backend selection is configured via YAML and automatically falls back to memory storage if external backends are unavailable.
+
+📚 **[Detailed Storage Implementation Guide](CLAUDE.md#storage-backends)** - Complete storage backend documentation, configuration options, and deployment patterns
+
+## MCP Compliance Summary
 
 **Specification Adherence**: The gateway provides a functional implementation of MCP authorization and transport specifications optimized for development use:
 
 - **Authorization**: Core OAuth 2.1 flow works effectively with MCP clients, handling dynamic client registration and PKCE authentication
 - **Transport**: Streamable HTTP transport is properly implemented with transparent proxying and user context injection
+- **Storage**: Configurable storage backends support development through enterprise deployment scenarios
 - **Demo Compatibility**: Successfully works with the included FastMCP calculator demo service
 
-**Design Philosophy**: Built as a development-focused OAuth 2.1 proxy for Streamable HTTP MCP services, prioritizing simplicity and rapid setup for prototyping and demonstration use. The in-memory design and monolithic structure make it ideal for development, testing, and proof-of-concept scenarios.
+**Design Philosophy**: Built as a development-focused OAuth 2.1 proxy for Streamable HTTP MCP services, prioritizing simplicity and rapid setup for prototyping and demonstration use. The configurable storage architecture enables scaling from development (memory) to production (Redis) to enterprise (Vault) deployments.

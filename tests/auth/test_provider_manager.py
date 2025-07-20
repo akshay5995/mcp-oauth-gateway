@@ -40,20 +40,25 @@ class TestProviderManager:
         provider = provider_manager.get_provider_for_service("github")
         assert provider is not None
         assert isinstance(provider, GitHubOAuthProvider)
-    
+
     def test_get_provider_for_service_wrong_provider(self, provider_manager):
         """Test getting provider for service with wrong provider raises error."""
-        with pytest.raises(ValueError, match="Service requests provider 'google' but only 'github' is configured"):
+        with pytest.raises(
+            ValueError,
+            match="Service requests provider 'google' but only 'github' is configured",
+        ):
             provider_manager.get_provider_for_service("google")
 
     def test_generate_callback_state(self, provider_manager):
         """Test callback state generation with correct provider."""
         state = provider_manager.generate_callback_state("github", "oauth_state_123")
         assert state == "github:oauth_state_123"
-    
+
     def test_generate_callback_state_wrong_provider(self, provider_manager):
         """Test callback state generation with wrong provider raises error."""
-        with pytest.raises(ValueError, match="Cannot generate callback state for provider 'google'"):
+        with pytest.raises(
+            ValueError, match="Cannot generate callback state for provider 'google'"
+        ):
             provider_manager.generate_callback_state("google", "oauth_state_123")
 
     def test_parse_callback_state_valid(self, provider_manager):
@@ -102,7 +107,10 @@ class TestProviderManager:
     @pytest.mark.asyncio
     async def test_handle_provider_callback_unknown_provider(self, provider_manager):
         """Test callback with unknown provider."""
-        with pytest.raises(ValueError, match="Callback received for provider 'unknown' but only 'github' is configured"):
+        with pytest.raises(
+            ValueError,
+            match="Callback received for provider 'unknown' but only 'github' is configured",
+        ):
             await provider_manager.handle_provider_callback(
                 "unknown", "auth_code", "http://localhost:8080/callback"
             )

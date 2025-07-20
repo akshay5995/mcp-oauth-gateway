@@ -25,9 +25,9 @@ class TestSingleProviderConstraint:
                 scopes=["openid", "email", "profile"],
             )
         }
-        
+
         provider_manager = ProviderManager(config)
-        
+
         assert len(provider_manager.providers) == 1
         assert "google" in provider_manager.providers
         assert provider_manager.primary_provider_id == "google"
@@ -45,19 +45,21 @@ class TestSingleProviderConstraint:
                 client_secret="github_client_secret",
             ),
         }
-        
-        with pytest.raises(ValueError, match="Only one OAuth provider can be configured"):
+
+        with pytest.raises(
+            ValueError, match="Only one OAuth provider can be configured"
+        ):
             ProviderManager(config)
 
     def test_no_providers_allowed_for_public_only(self):
         """Test that no providers configured is allowed for public-only gateways."""
         config = {}
-        
+
         # This should now be allowed for public-only gateways
         provider_manager = ProviderManager(config)
         assert len(provider_manager.providers) == 0
         assert provider_manager.primary_provider_id == ""
-        
+
         # Should return None for provider requests
         assert provider_manager.get_provider_for_service(None) is None
         assert provider_manager.get_provider_for_service("") is None
@@ -70,15 +72,15 @@ class TestSingleProviderConstraint:
                 client_secret="github_client_secret",
             )
         }
-        
+
         provider_manager = ProviderManager(config)
-        
+
         assert provider_manager.get_primary_provider_id() == "github"
-        
+
         primary_provider = provider_manager.get_primary_provider()
         assert primary_provider is not None
         assert isinstance(primary_provider, GitHubOAuthProvider)
-        
+
         # Should be the same as get_provider
         assert primary_provider == provider_manager.get_provider("github")
 
@@ -90,15 +92,18 @@ class TestSingleProviderConstraint:
                 client_secret="google_client_secret",
             )
         }
-        
+
         provider_manager = ProviderManager(config)
-        
+
         # Should work with correct provider
         provider = provider_manager.get_provider_for_service("google")
         assert provider is not None
-        
+
         # Should raise error with wrong provider
-        with pytest.raises(ValueError, match="Service requests provider 'github' but only 'google' is configured"):
+        with pytest.raises(
+            ValueError,
+            match="Service requests provider 'github' but only 'google' is configured",
+        ):
             provider_manager.get_provider_for_service("github")
 
     def test_generate_callback_state_validates_provider(self):
@@ -109,15 +114,17 @@ class TestSingleProviderConstraint:
                 client_secret="google_client_secret",
             )
         }
-        
+
         provider_manager = ProviderManager(config)
-        
+
         # Should work with correct provider
         state = provider_manager.generate_callback_state("google", "oauth_state_123")
         assert state == "google:oauth_state_123"
-        
+
         # Should raise error with wrong provider
-        with pytest.raises(ValueError, match="Cannot generate callback state for provider 'github'"):
+        with pytest.raises(
+            ValueError, match="Cannot generate callback state for provider 'github'"
+        ):
             provider_manager.generate_callback_state("github", "oauth_state_123")
 
     @pytest.mark.asyncio
@@ -129,12 +136,14 @@ class TestSingleProviderConstraint:
                 client_secret="google_client_secret",
             )
         }
-        
+
         provider_manager = ProviderManager(config)
-        
+
         # Mock the provider
         mock_provider = AsyncMock()
-        mock_provider.exchange_code_for_token.return_value = {"access_token": "test_token"}
+        mock_provider.exchange_code_for_token.return_value = {
+            "access_token": "test_token"
+        }
         mock_provider.get_user_info.return_value = UserInfo(
             id="user_123",
             email="user@example.com",
@@ -142,15 +151,18 @@ class TestSingleProviderConstraint:
             provider="google",
         )
         provider_manager.providers["google"] = mock_provider
-        
+
         # Should work with correct provider
         user_info = await provider_manager.handle_provider_callback(
             "google", "auth_code", "http://localhost:8080/callback"
         )
         assert user_info.provider == "google"
-        
+
         # Should raise error with wrong provider
-        with pytest.raises(ValueError, match="Callback received for provider 'github' but only 'google' is configured"):
+        with pytest.raises(
+            ValueError,
+            match="Callback received for provider 'github' but only 'google' is configured",
+        ):
             await provider_manager.handle_provider_callback(
                 "github", "auth_code", "http://localhost:8080/callback"
             )
@@ -159,10 +171,13 @@ class TestSingleProviderConstraint:
 class TestSingleProviderTypes:
     """Test different single provider type configurations."""
 
-    @pytest.mark.parametrize("provider_type,provider_class", [
-        ("google", GoogleOAuthProvider),
-        ("github", GitHubOAuthProvider),
-    ])
+    @pytest.mark.parametrize(
+        "provider_type,provider_class",
+        [
+            ("google", GoogleOAuthProvider),
+            ("github", GitHubOAuthProvider),
+        ],
+    )
     def test_single_provider_types(self, provider_type, provider_class):
         """Test initialization of different single provider types."""
         config = {
@@ -171,9 +186,9 @@ class TestSingleProviderTypes:
                 client_secret=f"{provider_type}_client_secret",
             )
         }
-        
+
         provider_manager = ProviderManager(config)
-        
+
         assert len(provider_manager.providers) == 1
         assert provider_type in provider_manager.providers
         assert provider_manager.primary_provider_id == provider_type
@@ -182,7 +197,7 @@ class TestSingleProviderTypes:
     def test_custom_provider_configuration(self):
         """Test custom provider as single provider."""
         from src.auth.provider_manager import CustomOAuthProvider
-        
+
         config = {
             "custom": OAuthProviderConfig(
                 client_id="custom_client_id",
@@ -193,9 +208,9 @@ class TestSingleProviderTypes:
                 scopes=["read", "write"],
             )
         }
-        
+
         provider_manager = ProviderManager(config)
-        
+
         assert len(provider_manager.providers) == 1
         assert "custom" in provider_manager.providers
         assert provider_manager.primary_provider_id == "custom"
@@ -221,7 +236,9 @@ class TestSingleProviderCallbacks:
         """Test successful provider callback with single provider."""
         # Mock the provider
         mock_provider = AsyncMock()
-        mock_provider.exchange_code_for_token.return_value = {"access_token": "google_token"}
+        mock_provider.exchange_code_for_token.return_value = {
+            "access_token": "google_token"
+        }
         mock_provider.get_user_info.return_value = UserInfo(
             id="google_user_123",
             email="user@gmail.com",
@@ -229,13 +246,13 @@ class TestSingleProviderCallbacks:
             provider="google",
             avatar_url="https://lh3.googleusercontent.com/avatar.jpg",
         )
-        
+
         single_provider_manager.providers["google"] = mock_provider
-        
+
         user_info = await single_provider_manager.handle_provider_callback(
             "google", "auth_code", "http://localhost:8080/callback"
         )
-        
+
         assert user_info.id == "google_user_123"
         assert user_info.email == "user@gmail.com"
         assert user_info.provider == "google"
@@ -248,9 +265,9 @@ class TestSingleProviderCallbacks:
         # Mock provider with no access token
         mock_provider = AsyncMock()
         mock_provider.exchange_code_for_token.return_value = {}  # No access_token
-        
+
         single_provider_manager.providers["google"] = mock_provider
-        
+
         with pytest.raises(ValueError, match="No access token received from provider"):
             await single_provider_manager.handle_provider_callback(
                 "google", "auth_code", "http://localhost:8080/callback"
@@ -262,9 +279,9 @@ class TestSingleProviderCallbacks:
         # Mock provider with network error
         mock_provider = AsyncMock()
         mock_provider.exchange_code_for_token.side_effect = Exception("Network error")
-        
+
         single_provider_manager.providers["google"] = mock_provider
-        
+
         with pytest.raises(Exception, match="Network error"):
             await single_provider_manager.handle_provider_callback(
                 "google", "auth_code", "http://localhost:8080/callback"
@@ -282,14 +299,18 @@ class TestBackwardCompatibility:
             "github": OAuthProviderConfig(client_id="id2", client_secret="secret2"),
             "okta": OAuthProviderConfig(client_id="id3", client_secret="secret3"),
         }
-        
+
         with pytest.raises(ValueError) as exc_info:
             ProviderManager(config)
-        
+
         error_message = str(exc_info.value)
         assert "Only one OAuth provider can be configured" in error_message
         assert "Found 3 providers" in error_message
-        assert "google" in error_message and "github" in error_message and "okta" in error_message
+        assert (
+            "google" in error_message
+            and "github" in error_message
+            and "okta" in error_message
+        )
         assert "OAuth 2.1 resource parameter constraints" in error_message
 
     def test_service_provider_mismatch_error(self):
@@ -300,12 +321,12 @@ class TestBackwardCompatibility:
                 client_secret="google_client_secret",
             )
         }
-        
+
         provider_manager = ProviderManager(config)
-        
+
         with pytest.raises(ValueError) as exc_info:
             provider_manager.get_provider_for_service("github")
-        
+
         error_message = str(exc_info.value)
         assert "Service requests provider 'github'" in error_message
         assert "but only 'google' is configured" in error_message

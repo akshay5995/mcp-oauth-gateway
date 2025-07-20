@@ -1,0 +1,45 @@
+name: Lint
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.11"
+        cache: 'pip'
+    
+    - name: Install linting dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install black>=23.0.0 ruff>=0.1.0
+    
+    - name: Check code formatting with Black
+      run: |
+        black --check --diff src/ tests/ demo/
+    
+    - name: Lint with Ruff
+      run: |
+        ruff check src/ tests/ demo/
+    
+    - name: Check for security issues with Bandit
+      run: |
+        pip install bandit[toml]>=1.7.0
+        bandit -r src/ --configfile .bandit -f json -o bandit-report.json || true
+        bandit -r src/ --configfile .bandit
+    
+    - name: Type checking with mypy (optional)
+      run: |
+        pip install mypy>=1.0.0 types-PyYAML types-requests
+        mypy src/ --ignore-missing-imports --no-strict-optional || true

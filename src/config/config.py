@@ -46,6 +46,87 @@ class CorsConfig:
 
 
 @dataclass
+class RedisStorageConfig:
+    """Redis storage configuration."""
+
+    host: str = "localhost"
+    port: int = 6379
+    password: Optional[str] = None
+    db: int = 0
+    ssl: bool = False
+    max_connections: int = 10
+
+
+@dataclass
+class VaultStorageConfig:
+    """Vault storage configuration."""
+
+    url: str
+    token: Optional[str] = None
+    mount_point: str = "secret"
+    path_prefix: str = "oauth-gateway"
+    auth_method: str = "token"  # token, approle, kubernetes
+
+
+@dataclass
+class StorageConfig:
+    """Storage backend configuration."""
+
+    type: str = "memory"  # memory, redis, vault
+    redis: RedisStorageConfig = field(default_factory=RedisStorageConfig)
+    vault: VaultStorageConfig = field(
+        default_factory=lambda: VaultStorageConfig(url="")
+    )
+
+    def validate(self) -> None:
+        """Validate storage configuration."""
+        valid_types = ["memory", "redis", "vault"]
+        if self.type not in valid_types:
+            raise ValueError(
+                f"Invalid storage type '{self.type}'. Must be one of: {', '.join(valid_types)}"
+            )
+
+        # Validate Redis configuration if Redis is selected
+        if self.type == "redis":
+            if not self.redis.host:
+                raise ValueError("Redis host is required when using Redis storage")
+            if not isinstance(self.redis.port, int) or not (
+                1 <= self.redis.port <= 65535
+            ):
+                raise ValueError(
+                    f"Invalid Redis port {self.redis.port}. Must be between 1-65535"
+                )
+            if (
+                not isinstance(self.redis.max_connections, int)
+                or self.redis.max_connections < 1
+            ):
+                raise ValueError(
+                    f"Invalid Redis max_connections {self.redis.max_connections}. Must be >= 1"
+                )
+
+        # Validate Vault configuration if Vault is selected
+        if self.type == "vault":
+            if not self.vault.url:
+                raise ValueError("Vault URL is required when using Vault storage")
+            if not self.vault.url.startswith(("http://", "https://")):
+                raise ValueError(
+                    f"Invalid Vault URL '{self.vault.url}'. Must start with http:// or https://"
+                )
+            if self.vault.auth_method not in ["token", "approle", "kubernetes"]:
+                raise ValueError(
+                    f"Invalid Vault auth method '{self.vault.auth_method}'. Must be one of: token, approle, kubernetes"
+                )
+            if self.vault.auth_method == "token" and not self.vault.token:
+                raise ValueError(
+                    "Vault token is required when using token authentication"
+                )
+            if not self.vault.mount_point:
+                raise ValueError("Vault mount_point is required")
+            if not self.vault.path_prefix:
+                raise ValueError("Vault path_prefix is required")
+
+
+@dataclass
 class GatewayConfig:
     """Main gateway configuration."""
 
@@ -58,6 +139,7 @@ class GatewayConfig:
     oauth_providers: Dict[str, OAuthProviderConfig] = field(default_factory=dict)
     mcp_services: Dict[str, McpServiceConfig] = field(default_factory=dict)
     cors: CorsConfig = field(default_factory=CorsConfig)
+    storage: StorageConfig = field(default_factory=StorageConfig)
 
 
 class ConfigManager:
@@ -169,6 +251,42 @@ class ConfigManager:
             allow_headers=cors_data.get("allow_headers", ["*"]),
         )
 
+        # Parse Storage configuration
+        storage_data = data.get("storage", {})
+
+        # Parse Redis configuration
+        redis_data = storage_data.get("redis", {})
+        redis_config = RedisStorageConfig(
+            host=redis_data.get("host", "localhost"),
+            port=redis_data.get("port", 6379),
+            password=redis_data.get("password"),
+            db=redis_data.get("db", 0),
+            ssl=redis_data.get("ssl", False),
+            max_connections=redis_data.get("max_connections", 10),
+        )
+
+        # Parse Vault configuration
+        vault_data = storage_data.get("vault", {})
+        vault_config = VaultStorageConfig(
+            url=vault_data.get("url", ""),
+            token=vault_data.get("token"),
+            mount_point=vault_data.get("mount_point", "secret"),
+            path_prefix=vault_data.get("path_prefix", "oauth-gateway"),
+            auth_method=vault_data.get("auth_method", "token"),
+        )
+
+        storage_config = StorageConfig(
+            type=storage_data.get("type", "memory"),
+            redis=redis_config,
+            vault=vault_config,
+        )
+
+        # Validate storage configuration
+        try:
+            storage_config.validate()
+        except ValueError as e:
+            raise ValueError(f"Storage configuration error: {e}") from e
+
         # Final validation: ensure at least one OAuth provider if any service requires auth
         auth_required_services = [
             service_id
@@ -205,6 +323,7 @@ class ConfigManager:
             oauth_providers=oauth_providers,
             mcp_services=mcp_services,
             cors=cors_config,
+            storage=storage_config,
         )
 
         return self.config

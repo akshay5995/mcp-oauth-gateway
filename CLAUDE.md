@@ -2,15 +2,24 @@
 
 This file provides guidance to Claude Code when working with the MCP OAuth Gateway codebase.
 
+📚 **Documentation Navigation**
+- 🚀 **[README.md](README.md)** - Quick start guide and basic configuration
+- 🏗️ **[ARCHITECTURE.md](ARCHITECTURE.md)** - System architecture and design
+- 👩‍💻 **[CLAUDE.md](CLAUDE.md)** - Developer guide and implementation details (this document)
+
 ## Project Overview
 
 The **MCP OAuth Gateway** is a work-in-progress OAuth 2.1 authorization server that provides transparent authentication and authorization for Model Context Protocol (MCP) services. It acts as a secure proxy that handles all OAuth complexity, allowing users to simply access `https://gateway.example.com/{service-id}/mcp` and have authentication handled automatically.
 
 **Key Features:**
-- **Service-Specific Token Binding**: Implements RFC 8707 resource parameters with canonical URIs
-- **MCP Protocol Compliance**: Full support for MCP Authorization specification (2025-06-18)
-- **Security Middleware Stack**: DNS rebinding protection and protocol validation
-- **Single Provider Architecture**: Simplified OAuth configuration with consistent authentication
+- **Transparent MCP Access**: Users access MCP services via simple URLs without manual OAuth setup
+- **Single OAuth Provider**: Uses one OAuth provider for all services (Google, GitHub, Okta, or custom)
+- **Full MCP Compliance**: Implements complete MCP authorization specification with OAuth 2.1
+- **Dynamic Client Registration**: Automatic client registration per RFC 7591
+- **User Context Injection**: Seamless user context headers for backend MCP services
+- **Resource-Specific Tokens**: RFC 8707 audience binding prevents token misuse
+- **Configurable Storage**: Memory (dev), Redis (production), Vault (enterprise) backends
+- **Production Ready**: Comprehensive testing, Docker support, scalable architecture
 
 ## Codebase Structure
 
@@ -26,6 +35,13 @@ src/
 │   └── token_manager.py    # JWT token creation/validation
 ├── config/
 │   └── config.py           # YAML configuration management
+├── storage/                 # Configurable storage backends
+│   ├── __init__.py         # Storage module exports
+│   ├── base.py             # Base storage interface and UnifiedStorage
+│   ├── manager.py          # Storage factory and lifecycle management
+│   ├── memory.py           # In-memory storage (default)
+│   ├── redis.py            # Redis storage backend (production)
+│   └── vault.py            # HashiCorp Vault storage (enterprise)
 ├── proxy/
 │   └── mcp_proxy.py        # HTTP proxy with user context injection
 └── api/
@@ -81,7 +97,7 @@ Complete Pydantic models for OAuth 2.1 entities:
 Core OAuth 2.1 authorization server implementation:
 - **Authorization endpoint** with PKCE and resource parameter support
 - **Token endpoint** for authorization code exchange
-- **State management** for OAuth flows with in-memory storage
+- **State management** for OAuth flows with configurable storage backends
 - **User session handling** with secure session secrets
 
 **Key methods:**
@@ -126,7 +142,7 @@ Dynamic Client Registration per RFC 7591:
 - **Redirect URI validation** for security
 - **Comprehensive validation** - Grant types, auth methods, response types
 - **Deduplication support** - Prevents duplicate registrations for same client
-- **In-memory client storage** (suitable for development)
+- **Configurable storage backends** (memory, Redis, Vault) with automatic fallback
 
 ### 3. Configuration (`config/config.py`)
 YAML-based configuration management:
@@ -159,7 +175,205 @@ mcp_services:
     scopes: ["read", "calculate"]
 ```
 
-### 4. MCP Proxy (`proxy/mcp_proxy.py`)
+### 4. Storage Backends (`storage/`)
+Production-ready configurable storage system with comprehensive backend support:
+- **Multiple backend support** - Memory (default), Redis (production), Vault (enterprise)
+- **Unified interface** - BaseStorage interface with UnifiedStorage implementation
+- **Dependency injection** - Factory pattern with automatic fallback
+- **Graceful degradation** - Automatic fallback to memory storage on failures
+- **TTL support** - Time-to-live for all storage operations across backends
+- **Health monitoring** - Comprehensive health checks and backend statistics
+- **Production testing** - 85+ storage tests with behavior-focused validation
+
+#### Base Storage Interface (`base.py`)
+Defines the contract for all storage backends:
+- **BaseStorage** - Abstract base class defining storage operations
+- **UnifiedStorage** - Concrete implementation avoiding multiple inheritance
+- **Consistent API** - Standardized methods across all storage backends
+- **Type safety** - Full type hints for all storage operations
+
+**Core interface methods:**
+- `async start()` - Initialize storage backend and resources
+- `async stop()` - Graceful shutdown and resource cleanup
+- `async get(key: str) -> Optional[Dict[str, Any]]` - Retrieve data by key
+- `async set(key: str, value: Dict[str, Any], ttl: Optional[int] = None)` - Store data with optional TTL
+- `async delete(key: str) -> bool` - Remove data and return success status
+- `async exists(key: str) -> bool` - Check if key exists
+- `async keys(pattern: str = "*") -> List[str]` - List keys matching pattern
+- `async clear()` - Remove all stored data
+- `async health_check() -> bool` - Backend health validation
+- `async get_stats() -> Dict[str, Any]` - Backend-specific statistics
+
+#### Storage Manager (`manager.py`)
+Factory pattern for creating and managing storage backends with production reliability:
+- **Dependency injection** - Similar to OAuth provider configuration pattern
+- **Automatic fallback** - Falls back to memory storage on initialization failures
+- **Lifecycle management** - Complete startup/shutdown procedures with error handling
+- **Health monitoring** - Continuous health checks and backend-specific statistics
+- **Error resilience** - Graceful handling of storage backend failures
+
+**Key methods:**
+- `create_storage_backend() -> UnifiedStorage` - Factory method with fallback logic
+- `start_storage() -> UnifiedStorage` - Initialize and start storage backend with fallback
+- `stop_storage()` - Graceful shutdown of storage resources with error handling
+- `health_check() -> bool` - Overall storage system health check
+- `get_storage_info() -> dict` - Storage backend information and status
+
+**Error handling and fallback:**
+- Falls back to memory storage if Redis/Vault dependencies unavailable
+- Falls back to memory storage if backend initialization fails
+- Continues operation if backend stops responding after initialization
+- Logs detailed error information for debugging
+
+#### Memory Storage (`memory.py`)
+High-performance in-memory storage backend using Python dictionaries:
+- **Development-friendly** - No external dependencies, immediate startup
+- **TTL implementation** - Background cleanup task for expired keys with asyncio
+- **Statistics tracking** - Key counts, TTL monitoring, operation metrics
+- **Thread-safe** - Async/await compatible with proper synchronization
+- **Suitable for** - Development, testing, single-instance deployments
+
+**Features:**
+- Dictionary-based storage with O(1) key operations
+- Automatic TTL cleanup with configurable cleanup intervals
+- Memory usage statistics and key count monitoring
+- Compatible with all OAuth data structures (codes, tokens, sessions)
+
+#### Redis Storage (`redis.py`)
+Production-ready Redis backend with enterprise features and Python 3.11+ compatibility:
+- **Modern Redis library support** - Uses redis-py for Python 3.11+ (fixes TimeoutError conflict) with aioredis fallback
+- **Connection resilience** - Automatic reconnection and error handling with dual library support
+- **TTL support** - Native Redis expiration with automatic cleanup
+- **Health checks** - Connection monitoring and Redis server statistics
+- **Performance optimization** - Connection pooling and pipeline support with hiredis acceleration
+- **Suitable for** - Production deployments, multi-instance scaling, high availability
+
+**Production features:**
+- Connection pooling with configurable limits (default: 20 connections)
+- SSL/TLS support for secure connections
+- Automatic JSON serialization/deserialization with error handling
+- Redis-native TTL handling with SET EX commands
+- Comprehensive error handling for network failures
+- Redis INFO command integration for server statistics
+- Support for Redis Cluster and Sentinel configurations
+
+**Configuration options:**
+```yaml
+redis:
+  host: "redis.example.com"
+  port: 6379
+  password: "${REDIS_PASSWORD}"
+  ssl: true
+  ssl_cert_reqs: "required"
+  ssl_ca_certs: "/path/to/ca.pem"
+  max_connections: 50
+  socket_timeout: 5.0
+  socket_connect_timeout: 5.0
+  retry_on_timeout: true
+  health_check_interval: 30
+```
+
+#### Vault Storage (`vault.py`)
+Enterprise-grade HashiCorp Vault backend with security focus:
+- **hvac integration** - Official Vault client library with async support
+- **KV v2 engine** - Structured secret storage with versioning support
+- **Token management** - Automatic token renewal and authentication
+- **Security compliance** - Encrypted storage at rest with audit trails
+- **Manual TTL** - Timestamp-based expiration handling for Vault KV store
+- **Suitable for** - Enterprise environments, compliance requirements, sensitive data
+
+**Enterprise security features:**
+- Token-based authentication with automatic renewal background task
+- Encrypted storage at rest with Vault's security model
+- Audit logging capabilities through Vault's audit backend
+- Path-based secret organization with configurable mount points
+- Support for multiple authentication methods (token, AppRole, Kubernetes)
+- Integration with Vault policies for fine-grained access control
+
+**Authentication methods:**
+```yaml
+vault:
+  # Token authentication (default)
+  auth_method: "token"
+  token: "${VAULT_TOKEN}"
+  
+  # AppRole authentication
+  auth_method: "approle"
+  role_id: "${VAULT_ROLE_ID}"
+  secret_id: "${VAULT_SECRET_ID}"
+  
+  # Kubernetes authentication
+  auth_method: "kubernetes"
+  role: "mcp-gateway"
+  jwt_path: "/var/run/secrets/kubernetes.io/serviceaccount/token"
+```
+
+**Vault configuration:**
+```yaml
+vault:
+  url: "https://vault.example.com:8200"
+  token: "${VAULT_TOKEN}"
+  mount_point: "kv"  # KV v2 mount point
+  path_prefix: "mcp-gateway/prod"  # Secret path prefix
+  auth_method: "token"
+  verify_ssl: true
+  timeout: 10
+  namespace: "prod"  # Vault Enterprise namespace
+```
+
+#### Storage Configuration
+Flexible YAML-based storage configuration with environment variable support:
+
+```yaml
+# Storage backend selection
+storage:
+  type: "memory"  # Options: memory, redis, vault
+  
+  # Redis configuration (when type: redis)
+  redis:
+    host: "${REDIS_HOST:-localhost}"
+    port: ${REDIS_PORT:-6379}
+    password: "${REDIS_PASSWORD}"
+    ssl: ${REDIS_SSL:-false}
+    ssl_cert_reqs: "required"
+    ssl_ca_certs: "${REDIS_CA_CERTS}"
+    max_connections: ${REDIS_MAX_CONNECTIONS:-20}
+    socket_timeout: 5.0
+    socket_connect_timeout: 5.0
+    retry_on_timeout: true
+    health_check_interval: 30
+    
+  # Vault configuration (when type: vault)
+  vault:
+    url: "${VAULT_URL}"
+    token: "${VAULT_TOKEN}"
+    mount_point: "${VAULT_MOUNT_POINT:-secret}"
+    path_prefix: "${VAULT_PATH_PREFIX:-mcp-gateway}"
+    auth_method: "${VAULT_AUTH_METHOD:-token}"
+    verify_ssl: ${VAULT_VERIFY_SSL:-true}
+    timeout: ${VAULT_TIMEOUT:-10}
+    namespace: "${VAULT_NAMESPACE}"  # Vault Enterprise
+    
+    # AppRole authentication
+    role_id: "${VAULT_ROLE_ID}"
+    secret_id: "${VAULT_SECRET_ID}"
+    
+    # Kubernetes authentication
+    role: "${VAULT_K8S_ROLE}"
+    jwt_path: "/var/run/secrets/kubernetes.io/serviceaccount/token"
+```
+
+#### Storage Testing
+Comprehensive test suite with 85+ tests ensuring production reliability:
+- **Behavior-focused testing** - Tests storage contracts rather than implementation details
+- **Fake implementations** - Test doubles for Redis and Vault to avoid external dependencies
+- **Error scenario testing** - Connection failures, timeout handling, backend unavailability
+- **Concurrent operation testing** - Thread safety and async operation validation
+- **TTL and expiration testing** - Time-based operations and cleanup validation
+- **Configuration testing** - YAML validation and environment variable substitution
+- **Integration testing** - End-to-end storage manager lifecycle testing
+
+### 5. MCP Proxy (`proxy/mcp_proxy.py`)
 HTTP request forwarding with user context injection:
 - **Transparent proxying** to backend MCP services
 - **User context headers** (`x-user-id`, `x-user-email`, etc.)
@@ -172,7 +386,7 @@ HTTP request forwarding with user context injection:
 - Handles both JSON-RPC and streaming responses
 - Configurable timeouts per service
 
-### 5. API Endpoints (`api/metadata.py`)
+### 6. API Endpoints (`api/metadata.py`)
 OAuth metadata endpoints per RFCs:
 - **Authorization Server Metadata** (RFC 8414) at `/.well-known/oauth-authorization-server`
 - **Protected Resource Metadata** (RFC 9728) at `/.well-known/oauth-protected-resource`
@@ -233,6 +447,31 @@ Validates MCP protocol compliance and version compatibility:
 - Bypasses validation for non-MCP endpoints
 
 ## Development Guidelines
+
+### Storage Backend Selection
+Choose the appropriate storage backend based on your deployment requirements:
+
+**Memory Storage** (Default)
+- ✅ Development and testing
+- ✅ Single-instance deployments
+- ✅ No external dependencies
+- ❌ Data loss on restart
+- ❌ Not suitable for multi-instance
+
+**Redis Storage**
+- ✅ Production deployments
+- ✅ Multi-instance scaling
+- ✅ Persistent data storage
+- ✅ High performance
+- ❌ Requires Redis infrastructure
+
+**Vault Storage**
+- ✅ Enterprise security requirements
+- ✅ Compliance and audit needs
+- ✅ Encrypted storage at rest
+- ✅ Fine-grained access control
+- ❌ Complex setup and maintenance
+- ❌ Higher operational overhead
 
 ### Configuring OAuth Provider
 
@@ -355,6 +594,68 @@ mcp_services:
 - **Validate redirect URIs** strictly
 - **Use service-specific canonical URIs** for proper token audience binding
 
+### Storage Backend Deployment
+
+**Development Setup (Memory)**
+```bash
+# Use default memory storage - no additional setup required
+python -m src.gateway --config config.yaml --debug
+```
+
+**Production Setup (Redis)**
+```bash
+# Install Redis dependencies (modern library for Python 3.11+)
+pip install -r requirements-redis.txt
+
+# Alternative: Install directly
+pip install 'redis[hiredis]>=4.5.0'  # For Python 3.11+
+# pip install aioredis>=2.0.0         # For older Python versions
+
+# Set environment variables
+export REDIS_HOST=redis.example.com
+export REDIS_PASSWORD=your-secure-password
+
+# Update config.yaml storage section
+# storage:
+#   type: "redis"
+#   redis:
+#     ssl: true
+#     max_connections: 50
+
+python -m src.gateway --config config.yaml
+```
+
+**Enterprise Setup (Vault)**
+```bash
+# Install Vault dependencies  
+pip install -r requirements-vault.txt
+
+# Set environment variables
+export VAULT_URL=https://vault.example.com:8200
+export VAULT_TOKEN=your-vault-token
+
+# Update config.yaml storage section
+# storage:
+#   type: "vault"
+#   vault:
+#     mount_point: "kv"
+#     path_prefix: "apps/mcp-gateway/prod"
+
+python -m src.gateway --config config.yaml
+```
+
+**Docker with Redis**
+```bash
+# Start Redis container
+docker run -d --name redis \
+  -p 6379:6379 \
+  redis:alpine redis-server --requirepass mypassword
+
+# Run gateway with Redis
+export REDIS_PASSWORD=mypassword
+python -m src.gateway --config config.yaml
+```
+
 ### Production Deployment
 
 - **Use environment variables** for all secrets
@@ -464,19 +765,96 @@ docker run -p 8080:8080 \
 - **State validation** prevents CSRF attacks
 - **Origin validation** protects against cross-origin attacks
 
-## Known Limitations
 
-- **Single OAuth provider** per gateway instance due to OAuth 2.1 resource parameter constraints
-- **In-memory storage** for sessions and clients (not suitable for multi-instance deployment)
-- **Limited refresh token support** - Implemented but not exposed as public endpoint
-- **No public token revocation endpoint** - Functionality exists but not exposed
-- **Limited to HTTP transport** for MCP (WebSocket not supported)
-- **No persistent user storage** (users re-authenticate each session)
-- **No token introspection endpoint** - Functionality exists but not exposed
+## Current Implementation Status
+
+### ✅ Implemented Features
+
+#### Complete OAuth 2.1 Implementation
+- Authorization code flow with PKCE support (S256 only) ✅
+- Refresh token flow with token rotation for public clients ✅
+- Dynamic Client Registration (RFC 7591) with comprehensive validation ✅ 
+- Authorization Server Metadata (RFC 8414) ✅
+- Protected Resource Metadata (RFC 9728) ✅
+- JWT token creation and validation with audience binding ✅
+- Token revocation functionality (internal) ✅
+- Client authentication (basic, post, none methods) ✅
+
+#### Advanced Security Features
+- PKCE code challenge validation (S256 required) ✅
+- JWT audience validation with service-specific resource binding ✅
+- Comprehensive redirect URI validation ✅
+- State parameter CSRF protection with expiration ✅
+- Bearer token authentication with timeout handling ✅
+- Client deduplication and credential security ✅
+- Single provider constraint enforcement ✅
+- Origin header validation for DNS rebinding protection ✅
+- MCP-Protocol-Version validation and enforcement ✅
+- Localhost binding warnings for development security ✅
+
+#### Production-Ready MCP Integration
+- HTTP proxy to backend MCP services with connection pooling ✅
+- User context header injection (`x-user-id`, `x-user-email`, etc.) ✅
+- Service-specific authentication requirements ✅
+- Configurable timeouts per service with 502/504 error handling ✅
+- Service health monitoring capabilities ✅
+- MCP protocol compliance with proper headers ✅
+
+#### Unit Testing Infrastructure
+- 16 test files covering individual components with mocking ✅
+- OAuth 2.1 component testing (PKCE validation, token exchange, metadata) ✅
+- Security boundary testing (token validation, redirect URI validation) ✅
+- Configuration validation testing (single provider constraints, service config) ✅
+- Provider component testing (Google, GitHub, Okta, custom with mocking) ✅
+- Configuration testing (YAML loading, environment variables, validation) ✅
+- Error handling and edge case testing with mocked scenarios ✅
+
+#### Resource Parameter Support
+- Resource parameter accepted and properly implemented per RFC 8707 ✅
+- Service-specific canonical URIs used as audience (e.g., `https://gateway.com/calculator/mcp`) ✅
+- Proper token audience binding prevents cross-service token reuse ✅
+- MCP clients get tokens bound to specific services per specification ✅
+
+### ❌ Current Limitations
+
+#### OAuth 2.1 Resource Parameter Constraints
+- **Single OAuth provider**: Due to domain-wide resource parameter requirements, only one OAuth provider can be configured per gateway instance
+- **Service provider binding**: All MCP services must use the same OAuth provider
+
+#### Default Deployment Constraints
+- **Memory storage default**: Default configuration uses memory storage (suitable for development)
+- **Single instance by default**: Requires Redis/Vault configuration for horizontal scaling
+- **Basic HTTP in development**: Development configuration uses HTTP (HTTPS recommended for production)
+
+#### Missing Public Endpoints
+- **Token revocation**: Functionality implemented but not exposed as public endpoint
+- **Token introspection**: Functionality implemented but not exposed as public endpoint
+- **Refresh token endpoint**: Basic implementation exists but needs enhancement
+
+#### Storage Backend Limitations
+- **Memory storage persistence**: Memory backend loses data on restart (by design)
+- **Vault TTL complexity**: Vault storage uses manual timestamp-based TTL (KV engine limitation)
+- **Redis dependency**: Redis backend requires aioredis library and Redis server
+
+## Architecture Design Notes
+
+### Streamable HTTP MCP Proxy Focus
+- **Purpose-built for MCP**: Specifically designed as an OAuth 2.1 proxy for Streamable HTTP MCP services
+- **Transparent authentication**: Handles OAuth complexity while maintaining MCP protocol semantics
+- **User context injection**: Adds authentication context via headers for backend MCP services
+- **Development-friendly**: In-memory storage and simple configuration for rapid development
+
+### Design Decisions
+- **Monolithic structure**: Single `gateway.py` file for simplicity and easier development
+- **HTTP proxy approach**: Transparent request/response forwarding maintains MCP protocol integrity
+- **OAuth 2.1 focus**: Implements core OAuth flows needed for MCP authorization
+- **Single provider design**: All services use the same OAuth provider due to resource parameter constraints
+
+This implementation provides a **development OAuth 2.1 gateway** for MCP services suitable for development, testing, and demonstration scenarios. The in-memory design and single-instance architecture make it ideal for rapid prototyping and proof-of-concept work.
 
 ## Future Enhancements
 
-- **Redis/database backend** for session storage
+- **Additional storage statistics** and monitoring endpoints
 - **Public refresh token endpoint** exposure
 - **Public token revocation endpoint** exposure  
 - **Token introspection endpoint** exposure
@@ -484,4 +862,3 @@ docker run -p 8080:8080 \
 - **User management interface** for administrators
 - **Metrics and observability** integration
 - **Rate limiting** for OAuth endpoints
-- **Multi-instance deployment** support with shared storage

@@ -1,0 +1,13 @@
+# All optional dependencies for complete installation
+# This installs core dependencies plus all storage backends
+-r requirements.txt
+
+# Redis storage backend (modern library for Python 3.11+)
+redis[hiredis]>=4.5.0
+
+# Vault storage backend
+hvac>=1.2.0
+aiohttp>=3.8.0
+
+# Legacy Redis support (if needed for Python 3.9-3.10)
+# aioredis>=2.0.0

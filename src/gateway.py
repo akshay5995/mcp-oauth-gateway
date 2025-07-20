@@ -1,6 +1,7 @@
 """Main MCP OAuth Gateway application."""
 
 import logging
+import time
 from contextlib import asynccontextmanager
 from typing import Optional
 from urllib.parse import urlencode
@@ -12,11 +13,14 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from .api.metadata import MetadataProvider
+from .auth.client_registry import ClientRegistry
 from .auth.models import AuthorizeRequest, ClientRegistrationRequest, TokenRequest
 from .auth.oauth_server import OAuthServer
 from .auth.provider_manager import ProviderManager
+from .auth.token_manager import TokenManager
 from .config.config import ConfigManager
 from .proxy.mcp_proxy import McpProxy
+from .storage.manager import StorageManager
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -110,11 +114,13 @@ class McpGateway:
         # Validate configuration before initializing components
         self._validate_configuration()
 
-        # Initialize core components
-        self.oauth_server = OAuthServer(
-            secret_key=self.config.session_secret, issuer=self.config.issuer
-        )
+        # Initialize storage manager
+        self.storage_manager = StorageManager(self.config.storage)
 
+        # These will be initialized in lifespan after storage is ready
+        self.oauth_server: Optional[OAuthServer] = None
+        self.token_manager: Optional[TokenManager] = None
+        self.client_registry: Optional[ClientRegistry] = None
         self.provider_manager = ProviderManager(self.config.oauth_providers)
         self.metadata_provider = MetadataProvider(self.config)
         self.mcp_proxy = McpProxy()
@@ -123,14 +129,55 @@ class McpGateway:
         @asynccontextmanager
         async def lifespan(app: FastAPI):
             # Startup
-            await self.mcp_proxy.start()
-            logger.info(
-                f"MCP OAuth Gateway started on {self.config.host}:{self.config.port}"
-            )
+            try:
+                # Start storage backend
+                storage_backend = await self.storage_manager.start_storage()
+
+                # Initialize OAuth components with storage backends
+                # All our storage backends implement all required interfaces
+                from .storage.base import UnifiedStorage
+
+                storage: UnifiedStorage = storage_backend
+
+                # Initialize token manager
+                self.token_manager = TokenManager(
+                    secret_key=self.config.session_secret,
+                    issuer=self.config.issuer,
+                    token_storage=storage,
+                )
+
+                # Initialize client registry
+                self.client_registry = ClientRegistry(client_storage=storage)
+
+                # Initialize OAuth server
+                self.oauth_server = OAuthServer(
+                    secret_key=self.config.session_secret,
+                    issuer=self.config.issuer,
+                    session_storage=storage,
+                    client_registry=self.client_registry,
+                    token_manager=self.token_manager,
+                )
+
+                # Start MCP proxy
+                await self.mcp_proxy.start()
+
+                logger.info(
+                    f"MCP OAuth Gateway started on {self.config.host}:{self.config.port} with {self.config.storage.type} storage"
+                )
+
+            except Exception as e:
+                logger.error(f"Failed to start gateway: {e}")
+                raise
+
             yield
+
             # Shutdown
-            await self.mcp_proxy.stop()
-            logger.info("MCP OAuth Gateway stopped")
+            try:
+                await self.mcp_proxy.stop()
+                await self.storage_manager.stop_storage()
+                logger.info("MCP OAuth Gateway stopped")
+            except Exception as e:
+                logger.error(f"Error during shutdown: {e}")
 
         self.app = FastAPI(
             title="MCP OAuth Gateway",
@@ -236,7 +283,61 @@ class McpGateway:
         @self.app.get("/health")
         async def health():
             """Health check endpoint."""
-            return {"status": "healthy"}
+            health_status = {
+                "status": "healthy",
+                "timestamp": time.time(),
+                "version": "1.0.0",
+            }
+
+            # Add storage backend health if available
+            if self.storage_manager:
+                storage_healthy = await self.storage_manager.health_check()
+                storage_info = self.storage_manager.get_storage_info()
+
+                health_status["storage"] = {
+                    "healthy": storage_healthy,
+                    "backend_type": storage_info["type"],
+                    "backend_class": storage_info["backend"],
+                }
+
+                # Overall health depends on storage health too
+                if not storage_healthy:
+                    health_status["status"] = "degraded"
+
+            return health_status
+
+        # Storage status endpoint
+        @self.app.get("/storage/status")
+        async def storage_status():
+            """Storage backend status endpoint."""
+            if not self.storage_manager:
+                raise HTTPException(
+                    status_code=500, detail="Storage manager not initialized"
+                )
+
+            storage_healthy = await self.storage_manager.health_check()
+            storage_info = self.storage_manager.get_storage_info()
+
+            status = {
+                "healthy": storage_healthy,
+                "backend_type": storage_info["type"],
+                "backend_class": storage_info["backend"],
+                "timestamp": time.time(),
+            }
+
+            # Add detailed stats if storage backend is available
+            if self.storage_manager._storage_backend:
+                try:
+                    if hasattr(self.storage_manager._storage_backend, "get_stats"):
+                        # All storage backends now have async get_stats
+                        backend_stats = (
+                            await self.storage_manager._storage_backend.get_stats()
+                        )
+                        status["stats"] = backend_stats
+                except Exception as e:
+                    status["stats_error"] = str(e)
+
+            return status
 
         # OAuth 2.1 Metadata endpoints
         @self.app.get("/.well-known/oauth-authorization-server")
@@ -274,6 +375,16 @@ class McpGateway:
             )
 
             # Handle authorization request
+            if not self.oauth_server:
+                error_params = {
+                    "error": "server_error",
+                    "error_description": "OAuth server not initialized",
+                    "state": state,
+                }
+                return RedirectResponse(
+                    url=f"{redirect_uri}?{urlencode(error_params)}", status_code=302
+                )
+
             logger.info("Processing authorization request")
             oauth_state, error = await self.oauth_server.handle_authorize(request)
 
@@ -326,7 +437,7 @@ class McpGateway:
                     )
 
             # Store OAuth state with provider info
-            oauth_state_obj = self.oauth_server.get_oauth_state(oauth_state)
+            oauth_state_obj = await self.oauth_server.get_oauth_state(oauth_state)
             if oauth_state_obj:
                 oauth_state_obj.provider = provider_id
 
@@ -367,7 +478,12 @@ class McpGateway:
                 )
 
                 # Get OAuth state
-                oauth_state_obj = self.oauth_server.get_oauth_state(oauth_state)
+                if not self.oauth_server:
+                    raise HTTPException(
+                        status_code=500, detail="OAuth server not initialized"
+                    )
+
+                oauth_state_obj = await self.oauth_server.get_oauth_state(oauth_state)
                 if not oauth_state_obj:
                     logger.warning(
                         f"OAuth state mismatch for state '{oauth_state}' - possible CSRF attack"
@@ -385,7 +501,7 @@ class McpGateway:
 
                 # Store user session
                 user_id = f"{provider_id}:{user_info.id}"
-                self.oauth_server.store_user_session(user_id, user_info)
+                await self.oauth_server.store_user_session(user_id, user_info)
 
                 # Create authorization code
                 resource_value = (
@@ -396,7 +512,7 @@ class McpGateway:
                 logger.info(
                     f"Creating authorization code for user '{user_id}' with resource '{resource_value}'"
                 )
-                auth_code = self.oauth_server.create_authorization_code(
+                auth_code = await self.oauth_server.create_authorization_code(
                     user_id, oauth_state_obj
                 )
 
@@ -452,6 +568,11 @@ class McpGateway:
                 refresh_token=refresh_token,
             )
 
+            if not self.oauth_server:
+                raise HTTPException(
+                    status_code=500, detail="OAuth server not initialized"
+                )
+
             logger.info(f"Token request: grant_type='{grant_type}'")
             token_response, error = await self.oauth_server.handle_token(request)
 
@@ -487,6 +608,11 @@ class McpGateway:
                     ),
                     scope=body.get("scope", ""),
                 )
+
+                if not self.oauth_server:
+                    raise HTTPException(
+                        status_code=500, detail="OAuth server not initialized"
+                    )
 
                 client_info, error = await self.oauth_server.handle_client_registration(
                     registration_request
@@ -589,7 +715,17 @@ class McpGateway:
                 logger.info(
                     f"Validating token for service '{service_id}': canonical_uri='{resource_uri}'"
                 )
-                token_payload = self.oauth_server.validate_access_token(
+                if not self.oauth_server:
+                    headers = {
+                        "WWW-Authenticate": f'Bearer resource_metadata="{self.config.issuer}/.well-known/oauth-protected-resource?service_id={service_id}"'
+                    }
+                    raise HTTPException(
+                        status_code=500,
+                        detail="OAuth server not initialized",
+                        headers=headers,
+                    )
+
+                token_payload = await self.oauth_server.validate_access_token(
                     credentials.credentials, resource=resource_uri
                 )
 

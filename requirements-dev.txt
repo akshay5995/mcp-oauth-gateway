@@ -1,0 +1,37 @@
+# Development dependencies for MCP OAuth Gateway
+# This includes all dependencies needed for development, testing, and CI
+
+# Core dependencies (inherit from main requirements)
+-r requirements.txt
+
+# Testing framework
+pytest>=7.0.0
+pytest-asyncio>=0.23.0
+pytest-httpx>=0.21.0
+pytest-cov>=4.0.0
+
+# Code quality and formatting
+black>=23.0.0
+ruff>=0.1.0
+mypy>=1.0.0
+
+# Security scanning
+bandit[toml]>=1.7.0
+
+# Type stubs
+types-PyYAML>=6.0.0
+types-requests>=2.28.0
+
+# Storage backend dependencies for development/testing
+redis[hiredis]>=4.5.0  # Modern Redis library (Python 3.11+)
+aioredis>=2.0.0        # Legacy Redis library (Python 3.9-3.10)
+hvac>=1.2.0            # HashiCorp Vault client
+aiohttp>=3.8.0         # Vault async HTTP dependency
+
+# Semantic versioning and releases
+python-semantic-release>=9.0.0
+
+# Documentation (optional)
+# sphinx>=6.0.0
+# sphinx-rtd-theme>=1.0.0
+# myst-parser>=1.0.0

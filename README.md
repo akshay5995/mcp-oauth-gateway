@@ -10,6 +10,10 @@ A OAuth 2.1 authorization server that provides transparent authentication and au
 - **Dynamic Client Registration**: Automatic client registration per RFC 7591
 - **User Context Injection**: Seamless user context headers for backend MCP services
 - **Resource-Specific Tokens**: RFC 8707 audience binding prevents token misuse
+- **Configurable Storage**: Memory (dev), Redis (production), Vault (enterprise) backends
+- **Production Ready**: Comprehensive testing, Docker support, scalable architecture
+
+📖 **[View Detailed Architecture](ARCHITECTURE.md)** | 📚 **[Developer Guide](CLAUDE.md)**
 
 ## Quick Start
 
@@ -17,71 +21,72 @@ A OAuth 2.1 authorization server that provides transparent authentication and au
 
 ```bash
 pip install -r requirements.txt
+
+# Optional: For Redis storage backend with modern library
+pip install -r requirements-redis.txt
 ```
 
 ### 2. Configure OAuth Provider
 
 **Important**: Configure only ONE OAuth provider per gateway instance.
 
-Set up environment variables for your chosen provider:
+Set up environment variables for Google OAuth:
 
 ```bash
-# Option 1: Google OAuth
 export GOOGLE_CLIENT_ID="your-google-client-id"
 export GOOGLE_CLIENT_SECRET="your-google-client-secret"
-
-# Option 2: GitHub OAuth
-export GITHUB_CLIENT_ID="your-github-client-id"  
-export GITHUB_CLIENT_SECRET="your-github-client-secret"
-
-# Option 3: Okta OAuth
-export OKTA_CLIENT_ID="your-okta-client-id"
-export OKTA_CLIENT_SECRET="your-okta-client-secret"
-export OKTA_DOMAIN="your-domain.okta.com"
-
-# Choose only ONE provider above
 ```
 
-### 3. Configure Services
+📚 **Other providers**: See [Configuration Guide](CLAUDE.md#configuring-oauth-provider) for GitHub, Okta, and custom OAuth providers
 
-Edit `config.yaml` to define your MCP services:
+### 3. Create Basic Configuration
+
+Create a `config.yaml` file:
 
 ```yaml
-# Configure single OAuth provider
+# Gateway settings
+host: "localhost"
+port: 8080
+issuer: "http://localhost:8080"
+session_secret: "your-dev-secret-change-in-production"
+debug: true
+
+# OAuth provider
 oauth_providers:
-  google:  # Configure only ONE provider
+  google:
     client_id: "${GOOGLE_CLIENT_ID}"
     client_secret: "${GOOGLE_CLIENT_SECRET}"
     scopes: ["openid", "email", "profile"]
 
-# All services must use the same provider
+# Example service (replace with your MCP service)
 mcp_services:
-  my_service:
-    name: "My MCP Service"
+  calculator:
+    name: "Calculator Service"
     url: "http://localhost:3001"
-    oauth_provider: "google"  # Must match configured provider
+    oauth_provider: "google"
     auth_required: true
-    scopes: ["read", "write"]
+    scopes: ["read", "calculate"]
 ```
 
 ### 4. Run the Gateway
 
 ```bash
-# Development mode
 python -m src.gateway --config config.yaml --debug
-
-# Production mode
-python -m src.gateway --config config.yaml
 ```
 
-### 5. Access MCP Services
+### 5. Test the Setup
 
-MCP clients can now access services at:
-```
-http://localhost:8080/<service-id>/mcp
+Access your service to verify it's working:
+```bash
+curl http://localhost:8080/calculator/mcp
+# Should return 401 with OAuth authentication info
 ```
 
-The gateway handles all OAuth complexity automatically!
+### 6. Add Your Services
+
+Replace the example service in `config.yaml` with your actual MCP services. All services must use the same OAuth provider.
+
+📚 **[Complete Configuration Guide](CLAUDE.md#adding-new-mcp-services)** - Detailed service configuration options
 
 ## MCP Client Integration
 
@@ -179,38 +184,13 @@ cors:
 
 ```yaml
 oauth_providers:
-  # Choose ONE of the following providers:
-  
-  # Option 1: Google OAuth
   google:
     client_id: "${GOOGLE_CLIENT_ID}"
     client_secret: "${GOOGLE_CLIENT_SECRET}"
     scopes: ["openid", "email", "profile"]
-  
-  # Option 2: GitHub OAuth
-  # github:
-  #   client_id: "${GITHUB_CLIENT_ID}"
-  #   client_secret: "${GITHUB_CLIENT_SECRET}"
-  #   scopes: ["user:email"]
-  
-  # Option 3: Okta OAuth
-  # okta:
-  #   client_id: "${OKTA_CLIENT_ID}"
-  #   client_secret: "${OKTA_CLIENT_SECRET}"
-  #   authorization_url: "https://${OKTA_DOMAIN}/oauth2/default/v1/authorize"
-  #   token_url: "https://${OKTA_DOMAIN}/oauth2/default/v1/token"
-  #   userinfo_url: "https://${OKTA_DOMAIN}/oauth2/default/v1/userinfo"
-  #   scopes: ["openid", "email", "profile"]
-  
-  # Option 4: Custom OAuth Provider
-  # custom:
-  #   authorization_url: "https://auth.company.com/oauth/authorize"
-  #   token_url: "https://auth.company.com/oauth/token"
-  #   userinfo_url: "https://auth.company.com/oauth/userinfo"
-  #   client_id: "${CUSTOM_CLIENT_ID}"
-  #   client_secret: "${CUSTOM_CLIENT_SECRET}"
-  #   scopes: ["openid", "email", "profile"]
 ```
+
+📚 **Alternative providers**: See [Configuration Guide](CLAUDE.md#configuring-oauth-provider) for GitHub, Okta, and custom OAuth provider examples
 
 ### MCP Services
 
@@ -255,20 +235,105 @@ Services can use these headers for:
 
 ## Docker Deployment
 
-### Build Image
+### Quick Start with Memory Storage
 
 ```bash
+# Build image
 docker build -t mcp-oauth-gateway .
-```
 
-### Run Container
-
-```bash
+# Run with memory storage (development)
 docker run -p 8080:8080 \
   -v $(pwd)/config.yaml:/app/config.yaml \
-  -e GOOGLE_CLIENT_ID="your-id" \
-  -e GOOGLE_CLIENT_SECRET="your-secret" \
+  -e GOOGLE_CLIENT_ID="your-google-client-id" \
+  -e GOOGLE_CLIENT_SECRET="your-google-client-secret" \
   mcp-oauth-gateway
+```
+
+### Production with Redis Storage
+
+```bash
+# Start Redis container
+docker run -d --name redis \
+  -p 6379:6379 \
+  redis:alpine redis-server --requirepass mypassword
+
+# Update config.yaml for Redis
+cat >> config.yaml << EOF
+storage:
+  type: "redis"
+  redis:
+    host: "host.docker.internal"  # or Redis container IP
+    port: 6379
+    password: "\${REDIS_PASSWORD}"
+EOF
+
+# Run gateway with Redis
+docker run -p 8080:8080 \
+  -v $(pwd)/config.yaml:/app/config.yaml \
+  -e GOOGLE_CLIENT_ID="your-google-client-id" \
+  -e GOOGLE_CLIENT_SECRET="your-google-client-secret" \
+  -e REDIS_PASSWORD="mypassword" \
+  mcp-oauth-gateway
+```
+
+### Enterprise with Vault Storage
+
+```bash
+# Start Vault container (dev mode)
+docker run -d --name vault \
+  -p 8200:8200 \
+  -e VAULT_DEV_ROOT_TOKEN_ID="myroot" \
+  vault:latest
+
+# Update config.yaml for Vault
+cat >> config.yaml << EOF
+storage:
+  type: "vault"
+  vault:
+    url: "http://host.docker.internal:8200"
+    token: "\${VAULT_TOKEN}"
+    mount_point: "secret"
+    path_prefix: "mcp-gateway"
+EOF
+
+# Run gateway with Vault
+docker run -p 8080:8080 \
+  -v $(pwd)/config.yaml:/app/config.yaml \
+  -e GOOGLE_CLIENT_ID="your-google-client-id" \
+  -e GOOGLE_CLIENT_SECRET="your-google-client-secret" \
+  -e VAULT_TOKEN="myroot" \
+  mcp-oauth-gateway
+```
+
+### Docker Compose Example
+
+```yaml
+# docker-compose.yml
+version: '3.8'
+services:
+  mcp-gateway:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config.yaml:/app/config.yaml
+    environment:
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - REDIS_PASSWORD=mypassword
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:alpine
+    command: redis-server --requirepass mypassword
+    ports:
+      - "6379:6379"
+```
+
+```bash
+# Start with Docker Compose
+docker-compose up -d
 ```
 
 ## API Endpoints
@@ -343,10 +408,13 @@ ruff format src/ demo/
 
 ### Environment Variables
 
+#### Gateway Configuration
 - `MCP_CONFIG_PATH` - Path to config file
 - `MCP_GATEWAY_HOST` - Host override
 - `MCP_GATEWAY_PORT` - Port override
 - `MCP_DEBUG` - Debug mode
+
+#### OAuth Providers
 - `GOOGLE_CLIENT_ID` - Google OAuth client ID
 - `GOOGLE_CLIENT_SECRET` - Google OAuth client secret
 - `GITHUB_CLIENT_ID` - GitHub OAuth client ID
@@ -355,16 +423,87 @@ ruff format src/ demo/
 - `OKTA_CLIENT_SECRET` - Okta OAuth client secret
 - `OKTA_DOMAIN` - Okta domain (e.g., dev-123.okta.com)
 
+#### Storage Backends
+- `REDIS_HOST` - Redis server host
+- `REDIS_PORT` - Redis server port
+- `REDIS_PASSWORD` - Redis authentication password
+- `REDIS_SSL` - Enable Redis SSL (true/false)
+- `VAULT_URL` - Vault server URL
+- `VAULT_TOKEN` - Vault authentication token
+- `VAULT_MOUNT_POINT` - Vault KV mount point
+- `VAULT_PATH_PREFIX` - Vault secret path prefix
+
+## Storage Backends
+
+Choose the appropriate storage backend for your deployment:
+
+### Memory Storage (Default)
+```yaml
+storage:
+  type: "memory"
+```
+✅ **Best for**: Development, testing, single-instance demos  
+❌ **Limitations**: Data lost on restart, single-instance only
+
+### Redis Storage (Production)
+```yaml
+storage:
+  type: "redis"
+  redis:
+    host: "${REDIS_HOST:-localhost}"
+    port: 6379
+    password: "${REDIS_PASSWORD}"
+    ssl: true
+    max_connections: 20
+```
+✅ **Best for**: Production deployments, horizontal scaling  
+✅ **Features**: Persistent storage, multi-instance support, connection pooling  
+✅ **Compatibility**: Uses modern redis-py library for Python 3.11+ compatibility
+
+### Vault Storage (Enterprise)
+```yaml
+storage:
+  type: "vault"
+  vault:
+    url: "${VAULT_URL}"
+    token: "${VAULT_TOKEN}"
+    mount_point: "secret"
+    path_prefix: "mcp-gateway"
+    auth_method: "token"  # or "approle", "kubernetes"
+```
+✅ **Best for**: Enterprise environments, compliance requirements  
+✅ **Features**: Encrypted at rest, audit logging, fine-grained access control
+
 ## Architecture
 
 The gateway implements a clean separation of concerns:
 
 - **OAuth Server**: Core OAuth 2.1 authorization server
-- **Provider Manager**: External OAuth provider integration
+- **Provider Manager**: External OAuth provider integration  
 - **Client Registry**: Dynamic client registration and management
 - **Token Manager**: JWT token creation and validation
+- **Storage Manager**: Configurable storage backends with fallback
 - **MCP Proxy**: Request forwarding with user context injection
 - **Metadata Provider**: OAuth metadata endpoint implementation
+
+📖 **[View Complete Architecture Documentation](ARCHITECTURE.md)**
+
+## Troubleshooting
+
+Having issues? Check the troubleshooting guide:
+
+📚 **[Troubleshooting Guide](CLAUDE.md#troubleshooting)** - Common issues and solutions including:
+- Origin validation errors (403 responses)
+- MCP protocol version issues (400 responses) 
+- Token audience validation problems (401 responses)
+- Configuration and deployment issues
+
+## Quick Links
+
+- 📖 **[Architecture Documentation](ARCHITECTURE.md)** - Comprehensive system design and data flows
+- 📚 **[Developer Guide](CLAUDE.md)** - Detailed development instructions and API reference
+- 🧪 **[Testing Guide](tests/)** - 197+ test cases covering all components
+- 🐳 **[Docker Examples](docker-compose.yml)** - Production deployment patterns
 
 ## License
 
