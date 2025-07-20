@@ -15,7 +15,37 @@ A OAuth 2.1 authorization server that provides transparent authentication and au
 
 📖 **[View Detailed Architecture](ARCHITECTURE.md)** | 📚 **[Developer Guide](CLAUDE.md)**
 
-## Quick Start
+## Quick Start with Docker (Recommended)
+
+### Pre-built Image
+
+Use the pre-built Docker image from GitHub Container Registry:
+
+```bash
+# Run with memory storage (development)
+docker run -p 8080:8080 \
+  -v $(pwd)/config.yaml:/app/config.yaml \
+  -e GOOGLE_CLIENT_ID="your-google-client-id" \
+  -e GOOGLE_CLIENT_SECRET="your-google-client-secret" \
+  ghcr.io/akshay5995/mcp-oauth-gateway:latest
+```
+
+### Docker Compose (Full Stack)
+
+```bash
+# Copy environment template
+cp .env.example .env
+# Edit .env with your OAuth credentials
+
+# Start all services (gateway + Redis + demo calculator)
+docker-compose up -d
+
+# Test the setup
+curl http://localhost:8080/health
+curl http://localhost:8080/calculator/mcp  # Should return 401 with OAuth info
+```
+
+## Local Development Setup
 
 ### 1. Install Dependencies
 
@@ -233,20 +263,7 @@ Services can use these headers for:
 - Personalized responses
 - User-specific data access
 
-## Docker Deployment
-
-### Pre-built Image (Recommended)
-
-Use the pre-built Docker image from GitHub Container Registry:
-
-```bash
-# Run with memory storage (development)
-docker run -p 8080:8080 \
-  -v $(pwd)/config.yaml:/app/config.yaml \
-  -e GOOGLE_CLIENT_ID="your-google-client-id" \
-  -e GOOGLE_CLIENT_SECRET="your-google-client-secret" \
-  ghcr.io/akshay5995/mcp-oauth-gateway:latest
-```
+## Advanced Docker Deployment
 
 ### Build from Source
 
@@ -254,7 +271,7 @@ docker run -p 8080:8080 \
 # Build image locally
 docker build -t mcp-oauth-gateway .
 
-# Run with memory storage (development)
+# Run with custom build
 docker run -p 8080:8080 \
   -v $(pwd)/config.yaml:/app/config.yaml \
   -e GOOGLE_CLIENT_ID="your-google-client-id" \
@@ -316,37 +333,6 @@ docker run -p 8080:8080 \
   -e GOOGLE_CLIENT_SECRET="your-google-client-secret" \
   -e VAULT_TOKEN="myroot" \
   ghcr.io/akshay5995/mcp-oauth-gateway:latest
-```
-
-### Docker Compose Example
-
-```yaml
-# docker-compose.yml
-version: '3.8'
-services:
-  mcp-gateway:
-    image: ghcr.io/akshay5995/mcp-oauth-gateway:latest
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./config.yaml:/app/config.yaml
-    environment:
-      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
-      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
-      - REDIS_PASSWORD=mypassword
-    depends_on:
-      - redis
-
-  redis:
-    image: redis:alpine
-    command: redis-server --requirepass mypassword
-    ports:
-      - "6379:6379"
-```
-
-```bash
-# Start with Docker Compose
-docker-compose up -d
 ```
 
 ## API Endpoints
