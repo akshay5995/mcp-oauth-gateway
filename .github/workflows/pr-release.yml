@@ -52,9 +52,15 @@ jobs:
         sed -i "s/version = \"${CURRENT_VERSION}\"/version = \"${RC_VERSION}\"/" pyproject.toml
         sed -i "s/__version__ = \"${CURRENT_VERSION}\"/__version__ = \"${RC_VERSION}\"/" src/__init__.py
         
-        # Create pre-release tag
+        # Create pre-release tag (delete if exists)
         git add pyproject.toml src/__init__.py
         git commit -m "chore: bump version to ${RC_VERSION} [skip ci]" || echo "No changes to commit"
+        
+        # Delete existing tag if it exists (locally and remotely)
+        git tag -d "v${RC_VERSION}" 2>/dev/null || true
+        git push --delete origin "v${RC_VERSION}" 2>/dev/null || true
+        
+        # Create new tag
         git tag -a "v${RC_VERSION}" -m "Pre-release version ${RC_VERSION}"
     
     - name: Push tag to trigger Docker build
