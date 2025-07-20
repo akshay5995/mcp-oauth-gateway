@@ -1,0 +1,78 @@
+# Docker Compose for MCP OAuth Gateway
+# This example shows production deployment with Redis storage
+
+version: '3.8'
+
+services:
+  # MCP OAuth Gateway
+  mcp-gateway:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config.yaml:/app/config.yaml
+    environment:
+      # OAuth Provider (choose one)
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      # - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
+      # - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
+      
+      # Storage backend
+      - REDIS_HOST=redis
+      - REDIS_PASSWORD=mypassword
+      
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  # Redis Storage Backend
+  redis:
+    image: redis:7-alpine
+    command: redis-server --requirepass mypassword --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+  # Optional: Vault Storage Backend (uncomment to use)
+  # vault:
+  #   image: vault:latest
+  #   ports:
+  #     - "8200:8200"
+  #   environment:
+  #     - VAULT_DEV_ROOT_TOKEN_ID=myroot
+  #     - VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200
+  #   cap_add:
+  #     - IPC_LOCK
+  #   restart: unless-stopped
+
+  # Example MCP Service (FastMCP Calculator)
+  calculator-service:
+    build: ./demo
+    ports:
+      - "3001:3001"
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+    driver: local
+
+# Usage Examples:
+#
+# 1. Start with Redis storage:
+#    docker-compose up -d
+#
+# 2. Start with memory storage only:
+#    docker-compose up mcp-gateway calculator-service
+#
+# 3. Start with Vault storage:
+#    # Uncomment vault service above and update config.yaml storage section
+#    docker-compose up -d
+#
+# 4. View logs:
+#    docker-compose logs -f mcp-gateway
+#
+# 5. Stop all services:
+#    docker-compose down

@@ -1,0 +1,6 @@
+# Vault storage backend dependencies
+-r requirements.txt
+
+# HashiCorp Vault client library and async HTTP support
+hvac>=1.2.0
+aiohttp>=3.8.0

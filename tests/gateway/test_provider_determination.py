@@ -71,8 +71,10 @@ class TestSingleProviderDetermination:
 
     def test_provider_determination_with_single_provider(self, single_github_config):
         """Test provider determination always returns the configured provider."""
-        with patch('src.gateway.ConfigManager') as mock_config_manager:
-            mock_config_manager.return_value.load_config.return_value = single_github_config
+        with patch("src.gateway.ConfigManager") as mock_config_manager:
+            mock_config_manager.return_value.load_config.return_value = (
+                single_github_config
+            )
             gateway = McpGateway()
 
             # Test various resource URIs - should always return the configured provider
@@ -91,8 +93,10 @@ class TestSingleProviderDetermination:
 
     def test_provider_determination_consistency(self, single_google_config):
         """Test that provider determination is consistent across multiple calls."""
-        with patch('src.gateway.ConfigManager') as mock_config_manager:
-            mock_config_manager.return_value.load_config.return_value = single_google_config
+        with patch("src.gateway.ConfigManager") as mock_config_manager:
+            mock_config_manager.return_value.load_config.return_value = (
+                single_google_config
+            )
             gateway = McpGateway()
 
             # Multiple calls should return the same provider
@@ -131,19 +135,21 @@ class TestSingleProviderDetermination:
         )
 
         # This should succeed now for public-only services
-        with patch('src.gateway.ConfigManager') as mock_config_manager:
+        with patch("src.gateway.ConfigManager") as mock_config_manager:
             mock_config_manager.return_value.load_config.return_value = empty_config
-            
+
             gateway = McpGateway()
-            
+
             # Should have no providers configured
             assert len(gateway.provider_manager.providers) == 0
             assert gateway.provider_manager.primary_provider_id == ""
 
     def test_provider_determination_performance(self, single_github_config):
         """Test that provider determination is performant (should be O(1) now)."""
-        with patch('src.gateway.ConfigManager') as mock_config_manager:
-            mock_config_manager.return_value.load_config.return_value = single_github_config
+        with patch("src.gateway.ConfigManager") as mock_config_manager:
+            mock_config_manager.return_value.load_config.return_value = (
+                single_github_config
+            )
             gateway = McpGateway()
 
             # Test many lookups - should be fast since it's just returning the configured provider
@@ -158,7 +164,7 @@ class TestSingleProviderDetermination:
                 assert provider == "github"
 
             elapsed = time.time() - start_time
-            
+
             # Should be very fast (less than 0.1 seconds for 1000 calls)
             assert elapsed < 0.1, f"Provider determination took too long: {elapsed}s"
 
@@ -191,21 +197,25 @@ class TestSingleProviderConstraintEnforcement:
             },
         )
 
-        with patch('src.gateway.ConfigManager') as mock_config_manager:
-            mock_config_manager.return_value.load_config.return_value = multi_provider_config
-            
-            with pytest.raises(ValueError, match="Only one OAuth provider can be configured"):
+        with patch("src.gateway.ConfigManager") as mock_config_manager:
+            mock_config_manager.return_value.load_config.return_value = (
+                multi_provider_config
+            )
+
+            with pytest.raises(
+                ValueError, match="Only one OAuth provider can be configured"
+            ):
                 McpGateway()
 
     def test_service_provider_mismatch_rejected(self):
         """Test that services with mismatched providers are rejected during config loading."""
         # This test verifies the config-level validation catches mismatched services
         # The actual config loading would fail before we even get to the gateway
-        
+
         # Note: This scenario would be caught by ConfigManager.load_config()
         # before we even reach the gateway initialization, so we test it indirectly
         # by verifying the gateway can only be created with valid single-provider configs
-        
+
         valid_config = GatewayConfig(
             host="localhost",
             port=8080,
@@ -227,10 +237,10 @@ class TestSingleProviderConstraintEnforcement:
         )
 
         # This should succeed
-        with patch('src.gateway.ConfigManager') as mock_config_manager:
+        with patch("src.gateway.ConfigManager") as mock_config_manager:
             mock_config_manager.return_value.load_config.return_value = valid_config
             gateway = McpGateway()
-            
+
             # Verify the gateway was created successfully
             assert gateway.provider_manager.primary_provider_id == "github"
             assert len(gateway.provider_manager.providers) == 1
@@ -257,7 +267,7 @@ class TestProviderDeterminationEdgeCases:
 
     def test_provider_determination_no_services(self, minimal_config):
         """Test provider determination when no services are configured."""
-        with patch('src.gateway.ConfigManager') as mock_config_manager:
+        with patch("src.gateway.ConfigManager") as mock_config_manager:
             mock_config_manager.return_value.load_config.return_value = minimal_config
             gateway = McpGateway()
 
@@ -269,7 +279,7 @@ class TestProviderDeterminationEdgeCases:
 
     def test_provider_determination_malformed_resources(self, minimal_config):
         """Test provider determination with malformed resource URIs."""
-        with patch('src.gateway.ConfigManager') as mock_config_manager:
+        with patch("src.gateway.ConfigManager") as mock_config_manager:
             mock_config_manager.return_value.load_config.return_value = minimal_config
             gateway = McpGateway()
 
@@ -287,11 +297,13 @@ class TestProviderDeterminationEdgeCases:
 
             for resource in malformed_resources:
                 provider = gateway._determine_provider_for_resource(resource)
-                assert provider == "github", f"Failed for malformed resource: {resource}"
+                assert provider == "github", (
+                    f"Failed for malformed resource: {resource}"
+                )
 
     def test_provider_determination_unicode_resources(self, minimal_config):
         """Test provider determination with unicode characters in resources."""
-        with patch('src.gateway.ConfigManager') as mock_config_manager:
+        with patch("src.gateway.ConfigManager") as mock_config_manager:
             mock_config_manager.return_value.load_config.return_value = minimal_config
             gateway = McpGateway()
 

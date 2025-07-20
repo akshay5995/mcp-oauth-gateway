@@ -1,0 +1,9 @@
+# Redis storage backend dependencies
+-r requirements.txt
+
+# Modern Redis library (recommended for Python 3.11+)
+# Includes hiredis for better performance
+redis[hiredis]>=4.5.0
+
+# Legacy fallback for older Python versions (if needed)
+# aioredis>=2.0.0

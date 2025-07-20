@@ -19,6 +19,28 @@ cors:
     - "OPTIONS"
   allow_headers: ["*"]         # Allowed headers (use specific headers in production)
 
+# Storage backend configuration
+storage:
+  # Storage backend type: memory, redis, vault
+  type: "memory"  # Default: in-memory storage (development)
+  
+  # Redis configuration (for production multi-instance deployments)
+  redis:
+    host: "${REDIS_HOST:-localhost}"
+    port: "${REDIS_PORT:-6379}"
+    password: "${REDIS_PASSWORD}"  # Optional
+    db: "${REDIS_DB:-0}"
+    ssl: false
+    max_connections: 20
+    
+  # Vault configuration (for enterprise/high-security deployments)
+  vault:
+    url: "${VAULT_URL:-http://localhost:8200}"
+    token: "${VAULT_TOKEN}"  # Required for token auth
+    mount_point: "${VAULT_MOUNT_POINT:-secret}"
+    path_prefix: "${VAULT_PATH_PREFIX:-mcp-gateway}"
+    auth_method: "${VAULT_AUTH_METHOD:-token}"  # token, approle, kubernetes
+
 # OAuth providers for user authentication
 oauth_providers:  
   github:
@@ -45,3 +67,43 @@ mcp_services:
     url: "http://localhost:3001/mcp"
     auth_required: false
     timeout: 10000
+
+# =============================================================================
+# Storage Backend Examples
+# =============================================================================
+
+# Example 1: Production Redis Configuration
+# storage:
+#   type: "redis"
+#   redis:
+#     host: "redis.example.com"
+#     port: 6379
+#     password: "${REDIS_PASSWORD}"
+#     ssl: true
+#     max_connections: 50
+
+# Example 2: Enterprise Vault Configuration  
+# storage:
+#   type: "vault"
+#   vault:
+#     url: "https://vault.example.com:8200"
+#     token: "${VAULT_TOKEN}"
+#     mount_point: "secret"
+#     path_prefix: "mcp-gateway/prod"
+
+# Example 3: Development with Docker Redis
+# storage:
+#   type: "redis"
+#   redis:
+#     host: "localhost"
+#     port: 6379
+#     # No password for local development
+
+# Example 4: Kubernetes with Vault
+# storage:
+#   type: "vault"
+#   vault:
+#     url: "https://vault.cluster.local:8200"
+#     auth_method: "kubernetes"
+#     mount_point: "kv"
+#     path_prefix: "apps/mcp-gateway"

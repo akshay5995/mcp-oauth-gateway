@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock
 
 import pytest
+import pytest_asyncio
 
 from src.auth.client_registry import ClientRegistry
 from src.auth.oauth_server import OAuthServer
@@ -13,7 +14,10 @@ from src.config.config import (
     GatewayConfig,
     McpServiceConfig,
     OAuthProviderConfig,
+    StorageConfig,
 )
+from src.storage.manager import StorageManager
+from src.storage.memory import MemoryStorage
 
 
 @pytest.fixture
@@ -26,6 +30,7 @@ def test_config():
         session_secret="test-secret-key-for-testing-only",
         debug=True,
         cors=CorsConfig(),
+        storage=StorageConfig(type="memory"),
         oauth_providers={
             "github": OAuthProviderConfig(
                 client_id="test_client_id",
@@ -54,24 +59,37 @@ def test_config():
     )
 
 
-@pytest.fixture
-def oauth_server(test_config):
+@pytest_asyncio.fixture
+async def oauth_server(
+    test_config,
+    memory_storage,
+    client_registry_with_storage,
+    token_manager_with_storage,
+):
     """OAuth server fixture."""
-    return OAuthServer(secret_key=test_config.session_secret, issuer=test_config.issuer)
-
-
-@pytest.fixture
-def token_manager(test_config):
-    """Token manager fixture."""
-    return TokenManager(
-        secret_key=test_config.session_secret, issuer=test_config.issuer
+    return OAuthServer(
+        secret_key=test_config.session_secret,
+        issuer=test_config.issuer,
+        session_storage=memory_storage,
+        client_registry=client_registry_with_storage,
+        token_manager=token_manager_with_storage,
     )
 
 
-@pytest.fixture
-def client_registry():
+@pytest_asyncio.fixture
+async def token_manager(test_config, memory_storage):
+    """Token manager fixture."""
+    return TokenManager(
+        secret_key=test_config.session_secret,
+        issuer=test_config.issuer,
+        token_storage=memory_storage,
+    )
+
+
+@pytest_asyncio.fixture
+async def client_registry(memory_storage):
     """Client registry fixture."""
-    return ClientRegistry()
+    return ClientRegistry(client_storage=memory_storage)
 
 
 @pytest.fixture
@@ -113,3 +131,63 @@ def single_google_provider_config():
             scopes=["openid", "email", "profile"],
         )
     }
+
+
+# Storage-related fixtures
+
+
+@pytest.fixture
+def storage_config():
+    """Default storage configuration for testing."""
+    return StorageConfig(type="memory")
+
+
+@pytest_asyncio.fixture
+async def memory_storage():
+    """Memory storage fixture."""
+    storage = MemoryStorage()
+    await storage.start()
+    yield storage
+    await storage.stop()
+
+
+@pytest_asyncio.fixture
+async def storage_manager(storage_config):
+    """Storage manager fixture."""
+    manager = StorageManager(storage_config)
+    storage = await manager.start_storage()
+    yield manager, storage
+    await manager.stop_storage()
+
+
+@pytest_asyncio.fixture
+async def token_manager_with_storage(test_config, memory_storage):
+    """Token manager fixture with storage backend."""
+    return TokenManager(
+        secret_key=test_config.session_secret,
+        issuer=test_config.issuer,
+        token_storage=memory_storage,
+    )
+
+
+@pytest_asyncio.fixture
+async def client_registry_with_storage(memory_storage):
+    """Client registry fixture with storage backend."""
+    return ClientRegistry(client_storage=memory_storage)
+
+
+@pytest_asyncio.fixture
+async def oauth_server_with_storage(
+    test_config,
+    memory_storage,
+    client_registry_with_storage,
+    token_manager_with_storage,
+):
+    """OAuth server fixture with storage backend."""
+    return OAuthServer(
+        secret_key=test_config.session_secret,
+        issuer=test_config.issuer,
+        session_storage=memory_storage,
+        client_registry=client_registry_with_storage,
+        token_manager=token_manager_with_storage,
+    )

@@ -341,6 +341,7 @@ data/
 !config/*.example.yaml
 !config/*.example.yml
 !config.example.yaml
+!.github/workflows/*.yml
 
 # =============================================================================
 # Project Specific
@@ -374,7 +375,6 @@ development/
 # =============================================================================
 
 # CI/CD specific files (keep templates)
-.github/workflows/*.yml
 !.github/workflows/*.example.yml
 
 # Coverage reports
@@ -398,3 +398,6 @@ perf.data.old
 .claude/
 
 .ruff_cache/
+
+# Docker compose
+!docker-compose.yml

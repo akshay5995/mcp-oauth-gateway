@@ -2,30 +2,34 @@
 
 import secrets
 import time
-from typing import Dict, Optional
+from dataclasses import asdict
+from typing import Optional
 
+from ..storage.base import ClientStorage
 from .models import ClientInfo, ClientRegistrationRequest
 
 
 class ClientRegistry:
     """Manages OAuth client registration and storage."""
 
-    def __init__(self):
-        self.clients: Dict[str, ClientInfo] = {}
+    def __init__(self, client_storage: ClientStorage):
+        self.client_storage = client_storage
 
-    def register_client(self, request: ClientRegistrationRequest) -> ClientInfo:
+    async def register_client(self, request: ClientRegistrationRequest) -> ClientInfo:
         """Register a new OAuth client per RFC 7591."""
         # Validate request
         self._validate_registration_request(request)
 
         # Check if a client with the same redirect URIs already exists (deduplication)
         # This helps with MCP clients that may register multiple times
-        for client in self.clients.values():
-            if (
-                set(client.redirect_uris) == set(request.redirect_uris)
-                and client.client_name == request.client_name
-            ):
-                return client
+        existing_client_data = await self.client_storage.find_client_by_redirect_uris(
+            request.redirect_uris
+        )
+        if (
+            existing_client_data
+            and existing_client_data.get("client_name") == request.client_name
+        ):
+            return ClientInfo(**existing_client_data)
 
         # Generate client credentials
         client_id = self._generate_client_id()
@@ -44,19 +48,22 @@ class ClientRegistry:
         )
 
         # Store client
-        self.clients[client_id] = client
+        await self.client_storage.store_client(client_id, asdict(client))
 
         return client
 
-    def get_client(self, client_id: str) -> Optional[ClientInfo]:
+    async def get_client(self, client_id: str) -> Optional[ClientInfo]:
         """Get client by ID."""
-        return self.clients.get(client_id)
+        client_data = await self.client_storage.get_client(client_id)
+        if not client_data:
+            return None
+        return ClientInfo(**client_data)
 
-    def authenticate_client(
+    async def authenticate_client(
         self, client_id: str, client_secret: str
     ) -> Optional[ClientInfo]:
         """Authenticate client credentials."""
-        client = self.get_client(client_id)
+        client = await self.get_client(client_id)
         if not client:
             return None
 
@@ -69,25 +76,25 @@ class ClientRegistry:
 
         return client
 
-    def validate_redirect_uri(self, client_id: str, redirect_uri: str) -> bool:
+    async def validate_redirect_uri(self, client_id: str, redirect_uri: str) -> bool:
         """Validate redirect URI for client."""
-        client = self.get_client(client_id)
+        client = await self.get_client(client_id)
         if not client:
             return False
 
         return redirect_uri in client.redirect_uris
 
-    def validate_grant_type(self, client_id: str, grant_type: str) -> bool:
+    async def validate_grant_type(self, client_id: str, grant_type: str) -> bool:
         """Validate grant type for client."""
-        client = self.get_client(client_id)
+        client = await self.get_client(client_id)
         if not client:
             return False
 
         return grant_type in client.grant_types
 
-    def validate_response_type(self, client_id: str, response_type: str) -> bool:
+    async def validate_response_type(self, client_id: str, response_type: str) -> bool:
         """Validate response type for client."""
-        client = self.get_client(client_id)
+        client = await self.get_client(client_id)
         if not client:
             return False
 

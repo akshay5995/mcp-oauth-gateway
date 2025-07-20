@@ -2,24 +2,31 @@
 
 import secrets
 import time
+from dataclasses import asdict
 from typing import Any, Dict, Optional
 
 from jose import JWTError, jwt
 
+from ..storage.base import TokenStorage
 from .models import AccessToken, RefreshToken, UserInfo
 
 
 class TokenManager:
     """Manages JWT token creation and validation."""
 
-    def __init__(self, secret_key: str, issuer: str, algorithm: str = "HS256"):
+    def __init__(
+        self,
+        secret_key: str,
+        issuer: str,
+        token_storage: TokenStorage,
+        algorithm: str = "HS256",
+    ):
         self.secret_key = secret_key
         self.issuer = issuer
         self.algorithm = algorithm
-        self.access_tokens: Dict[str, AccessToken] = {}
-        self.refresh_tokens: Dict[str, RefreshToken] = {}
+        self.token_storage = token_storage
 
-    def create_access_token(
+    async def create_access_token(
         self,
         client_id: str,
         user_id: str,
@@ -74,11 +81,14 @@ class TokenManager:
             expires_at=expires_at,
         )
 
-        self.access_tokens[token] = access_token
+        # Store token info in storage
+        await self.token_storage.store_access_token(
+            token, asdict(access_token), ttl=expires_in
+        )
 
         return token
 
-    def create_refresh_token(
+    async def create_refresh_token(
         self,
         client_id: str,
         user_id: str,
@@ -97,11 +107,14 @@ class TokenManager:
             expires_at=expires_at,
         )
 
-        self.refresh_tokens[token] = refresh_token
+        # Store refresh token info in storage
+        await self.token_storage.store_refresh_token(
+            token, asdict(refresh_token), ttl=expires_in
+        )
 
         return token
 
-    def validate_access_token(
+    async def validate_access_token(
         self, token: str, resource: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """Validate JWT access token."""
@@ -130,129 +143,96 @@ class TokenManager:
                     return None
 
             # Check if token is stored (for revocation support)
-            stored_token = self.access_tokens.get(token)
-            if stored_token and stored_token.is_expired():
-                del self.access_tokens[token]
-                return None
+            stored_token_data = await self.token_storage.get_access_token(token)
+            if stored_token_data:
+                stored_token = AccessToken(**stored_token_data)
+                if stored_token.is_expired():
+                    await self.token_storage.delete_access_token(token)
+                    return None
 
             return payload
 
         except JWTError:
             return None
 
-    def validate_refresh_token(self, token: str) -> Optional[RefreshToken]:
+    async def validate_refresh_token(self, token: str) -> Optional[RefreshToken]:
         """Validate refresh token."""
-        refresh_token = self.refresh_tokens.get(token)
-        if not refresh_token:
+        refresh_token_data = await self.token_storage.get_refresh_token(token)
+        if not refresh_token_data:
             return None
 
+        refresh_token = RefreshToken(**refresh_token_data)
         if refresh_token.is_expired():
-            del self.refresh_tokens[token]
+            await self.token_storage.delete_refresh_token(token)
             return None
 
         return refresh_token
 
-    def revoke_access_token(self, token: str) -> bool:
+    async def revoke_access_token(self, token: str) -> bool:
         """Revoke access token."""
-        if token in self.access_tokens:
-            del self.access_tokens[token]
-            return True
-        return False
+        return await self.token_storage.delete_access_token(token)
 
-    def revoke_refresh_token(self, token: str) -> bool:
+    async def revoke_refresh_token(self, token: str) -> bool:
         """Revoke refresh token."""
-        if token in self.refresh_tokens:
-            del self.refresh_tokens[token]
-            return True
-        return False
+        return await self.token_storage.delete_refresh_token(token)
 
-    def revoke_all_tokens_for_client(self, client_id: str) -> int:
+    async def revoke_all_tokens_for_client(self, client_id: str) -> int:
         """Revoke all tokens for a specific client."""
         revoked_count = 0
 
-        # Revoke access tokens
-        access_tokens_to_remove = [
-            token
-            for token, token_info in self.access_tokens.items()
-            if token_info.client_id == client_id
-        ]
+        # Get all access tokens
+        access_keys = await self.token_storage.keys("access_token:*")
+        for key in access_keys:
+            token_data = await self.token_storage.get(key)
+            if token_data and token_data.get("client_id") == client_id:
+                await self.token_storage.delete(key)
+                revoked_count += 1
 
-        for token in access_tokens_to_remove:
-            del self.access_tokens[token]
-            revoked_count += 1
-
-        # Revoke refresh tokens
-        refresh_tokens_to_remove = [
-            token
-            for token, token_info in self.refresh_tokens.items()
-            if token_info.client_id == client_id
-        ]
-
-        for token in refresh_tokens_to_remove:
-            del self.refresh_tokens[token]
-            revoked_count += 1
+        # Get all refresh tokens
+        refresh_keys = await self.token_storage.keys("refresh_token:*")
+        for key in refresh_keys:
+            token_data = await self.token_storage.get(key)
+            if token_data and token_data.get("client_id") == client_id:
+                await self.token_storage.delete(key)
+                revoked_count += 1
 
         return revoked_count
 
-    def revoke_all_tokens_for_user(self, user_id: str) -> int:
+    async def revoke_all_tokens_for_user(self, user_id: str) -> int:
         """Revoke all tokens for a specific user."""
-        revoked_count = 0
+        return await self.token_storage.revoke_user_tokens(user_id)
 
-        # Revoke access tokens
-        access_tokens_to_remove = [
-            token
-            for token, token_info in self.access_tokens.items()
-            if token_info.user_id == user_id
-        ]
-
-        for token in access_tokens_to_remove:
-            del self.access_tokens[token]
-            revoked_count += 1
-
-        # Revoke refresh tokens
-        refresh_tokens_to_remove = [
-            token
-            for token, token_info in self.refresh_tokens.items()
-            if token_info.user_id == user_id
-        ]
-
-        for token in refresh_tokens_to_remove:
-            del self.refresh_tokens[token]
-            revoked_count += 1
-
-        return revoked_count
-
-    def cleanup_expired_tokens(self) -> int:
+    async def cleanup_expired_tokens(self) -> int:
         """Clean up expired tokens."""
+        # Storage backends with TTL will handle this automatically,
+        # but we can check for any manually expired tokens
         cleaned_count = 0
 
-        # Clean access tokens
-        expired_access_tokens = [
-            token
-            for token, token_info in self.access_tokens.items()
-            if token_info.is_expired()
-        ]
+        # Check access tokens
+        access_keys = await self.token_storage.keys("access_token:*")
+        for key in access_keys:
+            token_data = await self.token_storage.get(key)
+            if token_data:
+                token = AccessToken(**token_data)
+                if token.is_expired():
+                    await self.token_storage.delete(key)
+                    cleaned_count += 1
 
-        for token in expired_access_tokens:
-            del self.access_tokens[token]
-            cleaned_count += 1
-
-        # Clean refresh tokens
-        expired_refresh_tokens = [
-            token
-            for token, token_info in self.refresh_tokens.items()
-            if token_info.is_expired()
-        ]
-
-        for token in expired_refresh_tokens:
-            del self.refresh_tokens[token]
-            cleaned_count += 1
+        # Check refresh tokens
+        refresh_keys = await self.token_storage.keys("refresh_token:*")
+        for key in refresh_keys:
+            token_data = await self.token_storage.get(key)
+            if token_data:
+                token = RefreshToken(**token_data)
+                if token.is_expired():
+                    await self.token_storage.delete(key)
+                    cleaned_count += 1
 
         return cleaned_count
 
-    def introspect_token(self, token: str) -> Optional[Dict[str, Any]]:
+    async def introspect_token(self, token: str) -> Optional[Dict[str, Any]]:
         """Introspect token per RFC 7662."""
-        payload = self.validate_access_token(token)
+        payload = await self.validate_access_token(token)
         if not payload:
             return {"active": False}
 
