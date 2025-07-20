@@ -44,3 +44,103 @@ ignore = [
 
 [tool.ruff.lint.isort]
 known-first-party = ["src"]
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mcp-oauth-gateway"
+version = "0.1.0"
+description = "OAuth 2.1 authorization server for Model Context Protocol (MCP) services"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [
+    { name = "MCP OAuth Gateway Contributors" },
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Web Environment",
+    "Framework :: FastAPI",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+    "Topic :: Security",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.104.1",
+    "uvicorn[standard]>=0.24.0",
+    "python-multipart>=0.0.6",
+    "python-jose[cryptography]>=3.3.0",
+    "cryptography>=45.0.0",
+    "pyyaml>=6.0.1",
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+    "python-dotenv>=1.0.0",
+    "httpx>=0.25.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-httpx>=0.21.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+    "bandit[toml]>=1.7.0",
+    "types-PyYAML>=6.0.0",
+    "types-requests>=2.28.0",
+    "python-semantic-release>=9.0.0",
+]
+redis = [
+    "redis[hiredis]>=4.5.0",
+    "aioredis>=2.0.0",
+]
+vault = [
+    "hvac>=1.2.0",
+    "aiohttp>=3.8.0",
+]
+all = [
+    "mcp-oauth-gateway[dev,redis,vault]",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/akshay5995/mcp-oauth-gateway"
+"Bug Reports" = "https://github.com/akshay5995/mcp-oauth-gateway/issues"
+"Source" = "https://github.com/akshay5995/mcp-oauth-gateway"
+"Documentation" = "https://github.com/akshay5995/mcp-oauth-gateway#readme"
+
+[project.scripts]
+mcp-oauth-gateway = "src.gateway:main"
+
+[tool.semantic_release]
+version_toml = ["pyproject.toml:project.version"]
+version_variables = ["src/__init__.py:__version__"]
+build_command = "pip install build && python -m build"
+dist_path = "dist/"
+upload_to_pypi = false
+upload_to_release = true
+remove_dist = false
+changelog_file = "CHANGELOG.md"
+changelog_placeholder = "<!--next-version-placeholder-->"
+
+[tool.semantic_release.commit_parser_options]
+allowed_tags = ["build", "chore", "ci", "docs", "feat", "fix", "perf", "style", "refactor", "test"]
+minor_tags = ["feat"]
+patch_tags = ["fix", "perf"]
+
+[tool.semantic_release.remote.token]
+env = "GITHUB_TOKEN"
+
+[tool.semantic_release.publish]
+dist_glob_patterns = ["dist/*"]
+upload_to_vcs_release = true

@@ -1,0 +1,86 @@
+name: PR Pre-release
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  pre-release:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        ref: ${{ github.event.pull_request.head.ref }}
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.11"
+        cache: 'pip'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install python-semantic-release
+    
+    - name: Configure git
+      run: |
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+    
+    - name: Generate RC version
+      id: version
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        # Get the current version
+        CURRENT_VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
+        
+        # Generate RC version based on PR number
+        RC_VERSION="${CURRENT_VERSION}-rc.${{ github.event.pull_request.number }}"
+        echo "RC_VERSION=${RC_VERSION}" >> $GITHUB_OUTPUT
+        
+        # Update version in files
+        sed -i "s/version = \"${CURRENT_VERSION}\"/version = \"${RC_VERSION}\"/" pyproject.toml
+        sed -i "s/__version__ = \"${CURRENT_VERSION}\"/__version__ = \"${RC_VERSION}\"/" src/__init__.py
+        
+        # Create pre-release tag
+        git add pyproject.toml src/__init__.py
+        git commit -m "chore: bump version to ${RC_VERSION} [skip ci]" || echo "No changes to commit"
+        git tag -a "v${RC_VERSION}" -m "Pre-release version ${RC_VERSION}"
+    
+    - name: Create GitHub pre-release
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        gh release create "v${{ steps.version.outputs.RC_VERSION }}" \
+          --title "Pre-release v${{ steps.version.outputs.RC_VERSION }}" \
+          --notes "Pre-release version for PR #${{ github.event.pull_request.number }}" \
+          --prerelease \
+          --target ${{ github.event.pull_request.head.sha }}
+    
+    - name: Comment on PR
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const rcVersion = '${{ steps.version.outputs.RC_VERSION }}';
+          const comment = `🚀 **Pre-release version created: \`v${rcVersion}\`**
+          
+          This pre-release version can be used for testing this PR.
+          
+          **Docker image**: \`ghcr.io/${{ github.repository }}:v${rcVersion}\``;
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment
+          });

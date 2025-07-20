@@ -28,6 +28,9 @@ aioredis>=2.0.0        # Legacy Redis library (Python 3.9-3.10)
 hvac>=1.2.0            # HashiCorp Vault client
 aiohttp>=3.8.0         # Vault async HTTP dependency
 
+# Semantic versioning and releases
+python-semantic-release>=9.0.0
+
 # Documentation (optional)
 # sphinx>=6.0.0
 # sphinx-rtd-theme>=1.0.0
