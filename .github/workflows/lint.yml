@@ -36,8 +36,8 @@ jobs:
     - name: Check for security issues with Bandit
       run: |
         pip install bandit[toml]>=1.7.0
-        bandit -r src/ -f json -o bandit-report.json || true
-        bandit -r src/
+        bandit -r src/ --configfile .bandit -f json -o bandit-report.json || true
+        bandit -r src/ --configfile .bandit
     
     - name: Type checking with mypy (optional)
       run: |
