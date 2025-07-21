@@ -51,7 +51,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mcp-oauth-gateway"
-version = "1.0.0"
+version = "1.0.0-rc.2"
 description = "OAuth 2.1 authorization server for Model Context Protocol (MCP) services"
 readme = "README.md"
 license = { text = "MIT" }
