@@ -1,6 +1,7 @@
 """Configuration management for MCP OAuth Gateway."""
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -165,6 +166,36 @@ class ConfigManager:
 
         return "config.yaml"  # Default
 
+    def _substitute_env_vars(self, content: str) -> str:
+        """Substitute environment variables in configuration content.
+
+        Supports formats:
+        - ${VAR_NAME} - Required environment variable (raises error if not set)
+        - ${VAR_NAME:-default_value} - Optional with default value
+        """
+
+        def replace_env_var(match):
+            var_expr = match.group(1)
+
+            if ":-" in var_expr:
+                # Format: ${VAR_NAME:-default_value}
+                var_name, default_value = var_expr.split(":-", 1)
+                return os.getenv(var_name, default_value)
+            else:
+                # Format: ${VAR_NAME}
+                var_name = var_expr
+                value = os.getenv(var_name)
+                if value is None:
+                    raise ValueError(
+                        f"Environment variable '{var_name}' is required but not set. "
+                        f"Please set {var_name} or use ${{{var_name}:-default}} format for optional variables."
+                    )
+                return value
+
+        # Pattern to match ${VAR_NAME} and ${VAR_NAME:-default}
+        pattern = r"\$\{([^}]+)\}"
+        return re.sub(pattern, replace_env_var, content)
+
     def load_config(self) -> GatewayConfig:
         """Load configuration from file."""
         config_file = Path(self.config_path)
@@ -176,7 +207,13 @@ class ConfigManager:
             return self.config
 
         with open(config_file) as f:
-            data = yaml.safe_load(f) or {}
+            raw_content = f.read()
+
+        # Substitute environment variables in the raw content
+        substituted_content = self._substitute_env_vars(raw_content)
+
+        # Parse the substituted YAML content
+        data = yaml.safe_load(substituted_content) or {}
 
         # Parse OAuth providers with single provider validation
         oauth_providers = {}
@@ -258,11 +295,11 @@ class ConfigManager:
         redis_data = storage_data.get("redis", {})
         redis_config = RedisStorageConfig(
             host=redis_data.get("host", "localhost"),
-            port=redis_data.get("port", 6379),
+            port=int(redis_data.get("port", 6379)),
             password=redis_data.get("password"),
-            db=redis_data.get("db", 0),
+            db=int(redis_data.get("db", 0)),
             ssl=redis_data.get("ssl", False),
-            max_connections=redis_data.get("max_connections", 10),
+            max_connections=int(redis_data.get("max_connections", 10)),
         )
 
         # Parse Vault configuration
