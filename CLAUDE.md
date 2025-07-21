@@ -486,6 +486,15 @@ oauth_providers:
     client_secret: "${GOOGLE_CLIENT_SECRET}"
     scopes: ["openid", "email", "profile"]
   
+  # For Okta (alternative to Google):
+  # okta:
+  #   client_id: "${OKTA_CLIENT_ID}"
+  #   client_secret: "${OKTA_CLIENT_SECRET}"
+  #   scopes: ["openid", "email", "profile"]
+  #   authorization_url: "https://your-domain.okta.com/oauth2/default/v1/authorize"
+  #   token_url: "https://your-domain.okta.com/oauth2/default/v1/token"
+  #   userinfo_url: "https://your-domain.okta.com/oauth2/default/v1/userinfo"
+  
   # For custom providers:
   # custom:
   #   authorization_url: "https://provider.com/oauth/authorize"

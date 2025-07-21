@@ -4,6 +4,8 @@ import os
 import tempfile
 from unittest.mock import patch
 
+import pytest
+
 from src.config.config import (
     ConfigManager,
     CorsConfig,
@@ -364,6 +366,197 @@ debug: false
 
         provider = config_manager.get_provider("nonexistent_provider")
         assert provider is None
+
+    @patch.dict(
+        os.environ,
+        {
+            "GITHUB_CLIENT_ID": "github_test_id",
+            "GITHUB_CLIENT_SECRET": "github_test_secret",
+            "REDIS_HOST": "redis.test.com",
+            "REDIS_PORT": "6380",
+            "VAULT_TOKEN": "vault_test_token",
+        },
+    )
+    def test_env_var_substitution_required_vars(self):
+        """Test environment variable substitution for required variables."""
+        yaml_content = """
+host: "127.0.0.1"
+port: 8080
+issuer: "http://localhost:8080"
+session_secret: "test-secret"
+
+storage:
+  type: "redis"
+  redis:
+    host: "${REDIS_HOST}"
+    port: "${REDIS_PORT}"
+  vault:
+    token: "${VAULT_TOKEN}"
+
+oauth_providers:
+  github:
+    client_id: "${GITHUB_CLIENT_ID}"
+    client_secret: "${GITHUB_CLIENT_SECRET}"
+    scopes: ["user:email"]
+
+mcp_services:
+  calculator:
+    name: "Calculator Service"
+    url: "http://localhost:3001/mcp"
+    oauth_provider: "github"
+    auth_required: true
+"""
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            config_path = f.name
+
+        try:
+            config_manager = ConfigManager(config_path)
+            config = config_manager.load_config()
+
+            # Check that environment variables were substituted
+            github_provider = config.oauth_providers["github"]
+            assert github_provider.client_id == "github_test_id"
+            assert github_provider.client_secret == "github_test_secret"
+
+            # Check storage config
+            assert config.storage.redis.host == "redis.test.com"
+            assert config.storage.redis.port == 6380  # Should be converted to int
+            assert config.storage.vault.token == "vault_test_token"
+
+        finally:
+            os.unlink(config_path)
+
+    @patch.dict(os.environ, {"REDIS_HOST": "redis.prod.com"}, clear=False)
+    def test_env_var_substitution_with_defaults(self):
+        """Test environment variable substitution with default values."""
+        yaml_content = """
+host: "127.0.0.1"
+port: 8080
+
+storage:
+  type: "redis"
+  redis:
+    host: "${REDIS_HOST:-localhost}"
+    port: "${REDIS_PORT:-6379}"
+    password: "${REDIS_PASSWORD:-}"
+    db: "${REDIS_DB:-0}"
+
+oauth_providers:
+  github:
+    client_id: "${GITHUB_CLIENT_ID:-default_client_id}"
+    client_secret: "${GITHUB_CLIENT_SECRET:-default_secret}"
+"""
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            config_path = f.name
+
+        try:
+            config_manager = ConfigManager(config_path)
+            config = config_manager.load_config()
+
+            # Check that environment variables were used
+            assert config.storage.redis.host == "redis.prod.com"  # From env
+            assert config.storage.redis.port == 6379  # Default value, converted to int
+            assert config.storage.redis.password == ""  # Default empty string
+            assert config.storage.redis.db == 0  # Default value
+
+            # Check OAuth provider defaults
+            github_provider = config.oauth_providers["github"]
+            assert github_provider.client_id == "default_client_id"
+            assert github_provider.client_secret == "default_secret"
+
+        finally:
+            os.unlink(config_path)
+
+    def test_env_var_substitution_missing_required(self):
+        """Test that missing required environment variables raise an error."""
+        yaml_content = """
+oauth_providers:
+  github:
+    client_id: "${MISSING_CLIENT_ID}"
+    client_secret: "static_secret"
+"""
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            config_path = f.name
+
+        try:
+            config_manager = ConfigManager(config_path)
+
+            with pytest.raises(
+                ValueError,
+                match="Environment variable 'MISSING_CLIENT_ID' is required but not set",
+            ):
+                config_manager.load_config()
+
+        finally:
+            os.unlink(config_path)
+
+    def test_env_var_substitution_mixed_formats(self):
+        """Test mixed environment variable formats in the same config."""
+        yaml_content = """
+host: "${HOST:-0.0.0.0}"
+port: "${PORT}"
+issuer: "${ISSUER:-http://localhost:8080}"
+session_secret: "${SESSION_SECRET}"
+debug: "${DEBUG:-false}"
+"""
+
+        with patch.dict(os.environ, {"PORT": "9000", "SESSION_SECRET": "secret123"}):
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".yaml", delete=False
+            ) as f:
+                f.write(yaml_content)
+                config_path = f.name
+
+            try:
+                config_manager = ConfigManager(config_path)
+                config = config_manager.load_config()
+
+                # Check mixed substitution results
+                assert config.host == "0.0.0.0"  # Default value
+                assert config.port == 9000  # From environment
+                assert config.issuer == "http://localhost:8080"  # Default value
+                assert config.session_secret == "secret123"  # From environment
+                assert config.debug is False  # Default value converted to boolean
+
+            finally:
+                os.unlink(config_path)
+
+    def test_substitute_env_vars_method_direct(self):
+        """Test the _substitute_env_vars method directly."""
+        config_manager = ConfigManager()
+
+        # Test required variable
+        with patch.dict(os.environ, {"TEST_VAR": "test_value"}):
+            result = config_manager._substitute_env_vars("value: ${TEST_VAR}")
+            assert result == "value: test_value"
+
+        # Test variable with default
+        result = config_manager._substitute_env_vars("value: ${MISSING_VAR:-default}")
+        assert result == "value: default"
+
+        # Test missing required variable
+        with pytest.raises(
+            ValueError,
+            match="Environment variable 'MISSING_REQUIRED' is required but not set",
+        ):
+            config_manager._substitute_env_vars("value: ${MISSING_REQUIRED}")
+
+        # Test multiple variables
+        with patch.dict(os.environ, {"VAR1": "value1", "VAR2": "value2"}):
+            result = config_manager._substitute_env_vars("${VAR1} and ${VAR2}")
+            assert result == "value1 and value2"
+
+        # Test variables with complex defaults
+        result = config_manager._substitute_env_vars(
+            "${VAR:-default with spaces and : colons}"
+        )
+        assert result == "default with spaces and : colons"
 
 
 class TestDataClasses:
