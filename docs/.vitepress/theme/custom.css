@@ -1,0 +1,45 @@
+/* Custom styles for Mermaid diagrams */
+.mermaid-container {
+  margin: 1.5rem 0;
+}
+
+/* Dark theme support for Mermaid */
+html.dark .mermaid-diagram {
+  background: var(--vp-c-bg-alt);
+}
+
+/* Make Mermaid diagrams responsive */
+.mermaid-diagram svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* Improve readability of Mermaid text in both themes */
+.mermaid-diagram .node rect,
+.mermaid-diagram .node circle,
+.mermaid-diagram .node ellipse,
+.mermaid-diagram .node polygon {
+  stroke: var(--vp-c-border);
+  fill: var(--vp-c-bg-soft);
+}
+
+.mermaid-diagram .edgeLabel {
+  background-color: var(--vp-c-bg);
+  color: var(--vp-c-text-1);
+}
+
+.mermaid-diagram .marker {
+  fill: var(--vp-c-text-2);
+}
+
+/* Sequence diagram improvements */
+.mermaid-diagram .actor {
+  fill: var(--vp-c-bg-soft);
+  stroke: var(--vp-c-border);
+}
+
+.mermaid-diagram .messageLine0,
+.mermaid-diagram .messageLine1 {
+  stroke: var(--vp-c-text-2);
+}

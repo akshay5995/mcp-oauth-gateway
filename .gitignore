@@ -402,3 +402,10 @@ perf.data.old
 
 # Docker compose
 !docker-compose.yml
+
+# docs
+
+!docs/*.yaml
+!docs/*.json
+
+node_modules
