@@ -263,6 +263,7 @@ class McpGateway:
             allow_credentials=self.config.cors.allow_credentials,
             allow_methods=self.config.cors.allow_methods,
             allow_headers=self.config.cors.allow_headers,
+            expose_headers=self.config.cors.expose_headers,
         )
 
     def _setup_routes(self):

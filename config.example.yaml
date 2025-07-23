@@ -18,6 +18,7 @@ cors:
     - "DELETE"
     - "OPTIONS"
   allow_headers: ["*"]         # Allowed headers (use specific headers in production)
+  expose_headers: []           # Headers exposed to browser clients (e.g., ["MCP-Session-ID", "X-Request-ID"])
 
 # Storage backend configuration
 storage:

@@ -95,6 +95,7 @@ cors:
   allow_credentials: false
   allow_methods: ["GET", "POST"]
   allow_headers: ["Authorization", "Content-Type"]
+  expose_headers: ["MCP-Session-ID", "X-Request-ID"]
 
 oauth_providers:
   github:
@@ -134,6 +135,7 @@ mcp_services:
             assert config.cors.allow_credentials is False
             assert config.cors.allow_methods == ["GET", "POST"]
             assert config.cors.allow_headers == ["Authorization", "Content-Type"]
+            assert config.cors.expose_headers == ["MCP-Session-ID", "X-Request-ID"]
 
             # Check OAuth provider
             assert "github" in config.oauth_providers
@@ -597,6 +599,7 @@ class TestDataClasses:
         assert config.allow_credentials is True
         assert config.allow_methods == ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
         assert config.allow_headers == ["*"]
+        assert config.expose_headers == []
 
     def test_gateway_config_defaults(self):
         """Test gateway config with defaults."""

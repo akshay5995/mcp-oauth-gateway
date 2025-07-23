@@ -44,6 +44,7 @@ class CorsConfig:
         default_factory=lambda: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
     )
     allow_headers: List[str] = field(default_factory=lambda: ["*"])
+    expose_headers: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -286,6 +287,7 @@ class ConfigManager:
                 "allow_methods", ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
             ),
             allow_headers=cors_data.get("allow_headers", ["*"]),
+            expose_headers=cors_data.get("expose_headers", []),
         )
 
         # Parse Storage configuration
@@ -381,6 +383,7 @@ class ConfigManager:
                 "allow_credentials": self.config.cors.allow_credentials,
                 "allow_methods": self.config.cors.allow_methods,
                 "allow_headers": self.config.cors.allow_headers,
+                "expose_headers": self.config.cors.expose_headers,
             },
             "oauth_providers": {},
             "mcp_services": {},

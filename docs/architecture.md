@@ -234,6 +234,48 @@ The gateway uses a component-based architecture. Key components:
 - **PKCE**: Required for all authorization flows
 - **Audience Binding**: Service-specific token scoping
 
+### 7. Browser Client Support
+
+**Decision**: CORS configuration with exposed headers for browser-based MCP clients.
+
+**Why Browser Support Matters**:
+- Web-based MCP clients need access to custom headers
+- Session management requires header visibility
+- OAuth flows work naturally in browsers
+
+**Configuration for Browser Clients**:
+```yaml
+cors:
+  allow_origins: ["https://your-web-app.com"]  # Your web app's domain
+  allow_credentials: true                       # Required for cookies/auth
+  expose_headers:                               # Headers browser can access
+    - "MCP-Session-ID"                         # Session tracking
+    - "X-Request-ID"                           # Request correlation
+    - "X-Rate-Limit-Remaining"                # Usage tracking
+```
+
+**What This Enables**:
+- **Session Persistence**: Browser can read and store `MCP-Session-ID`
+- **Request Tracking**: Correlate requests with `X-Request-ID`
+- **Rate Limit Awareness**: Display usage with rate limit headers
+
+**Example Browser Client**:
+```javascript
+// Browser can now access exposed headers
+const response = await fetch('https://gateway.example.com/service/mcp', {
+  headers: {
+    'Authorization': 'Bearer ' + accessToken,
+    'MCP-Protocol-Version': '2025-06-18'
+  }
+});
+
+// Access exposed headers
+const sessionId = response.headers.get('MCP-Session-ID');
+const requestId = response.headers.get('X-Request-ID');
+```
+
+**Security Note**: Only expose headers that browser clients need. Avoid exposing sensitive internal headers.
+
 ## Why These Decisions?
 
 **Focus**: Do one thing well - transparent OAuth for MCP HTTP services  
