@@ -297,9 +297,9 @@ class TestProviderDeterminationEdgeCases:
 
             for resource in malformed_resources:
                 provider = gateway._determine_provider_for_resource(resource)
-                assert (
-                    provider == "github"
-                ), f"Failed for malformed resource: {resource}"
+                assert provider == "github", (
+                    f"Failed for malformed resource: {resource}"
+                )
 
     def test_provider_determination_unicode_resources(self, minimal_config):
         """Test provider determination with unicode characters in resources."""

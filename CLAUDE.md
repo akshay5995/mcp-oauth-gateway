@@ -550,6 +550,48 @@ cors:
 - **Development** (`debug=true`): Permissive origin validation for easy testing
 - **Production** (`debug=false`): Strict origin validation with localhost fallback for debugging
 
+### Browser Client Configuration
+
+For browser-based MCP clients, configure CORS to expose necessary headers:
+
+**Basic Browser Support:**
+```yaml
+cors:
+  allow_origins: ["https://your-web-app.com"]
+  allow_credentials: true
+  expose_headers: []  # Empty by default
+```
+
+**Advanced Browser Configuration:**
+```yaml
+cors:
+  allow_origins: ["https://your-web-app.com"]
+  allow_credentials: true
+  allow_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+  allow_headers: ["Authorization", "Content-Type", "MCP-Protocol-Version"]
+  expose_headers:  # Headers browser clients can access
+    - "MCP-Session-ID"         # For session persistence
+    - "X-Request-ID"           # For request tracking
+    - "X-Rate-Limit-Remaining" # For usage display
+    - "X-Custom-Header"        # Your custom headers
+```
+
+**What `expose_headers` Does:**
+- By default, browsers can only access basic headers (Content-Type, etc.)
+- `expose_headers` allows JavaScript to read custom response headers
+- Essential for MCP clients that need session IDs or request tracking
+
+**Browser Client Example:**
+```javascript
+// Without expose_headers, these return null:
+const sessionId = response.headers.get('MCP-Session-ID');     // null
+const requestId = response.headers.get('X-Request-ID');       // null
+
+// With expose_headers configured, these work:
+const sessionId = response.headers.get('MCP-Session-ID');     // "session-123"
+const requestId = response.headers.get('X-Request-ID');       // "req-456"
+```
+
 ### Adding New MCP Services
 
 1. **Configure the service** in `config.yaml`:
