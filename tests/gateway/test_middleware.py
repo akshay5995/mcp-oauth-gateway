@@ -7,6 +7,7 @@ from starlette.responses import PlainTextResponse
 from starlette.routing import Route
 
 from src.gateway import MCPProtocolVersionMiddleware, OriginValidationMiddleware
+from src.middleware.logging_middleware import CustomLoggingMiddleware
 
 
 class TestOriginValidationMiddleware:
@@ -298,3 +299,212 @@ class TestMiddlewareIntegration:
         assert response.status_code == 200
         assert "Origin: none" in response.text
         assert "Version: 2025-06-18" in response.text
+
+
+class TestCustomLoggingMiddleware:
+    """Test cases for custom logging middleware."""
+
+    @pytest.fixture
+    def captured_logs(self, caplog):
+        """Fixture to capture log messages."""
+        import logging
+
+        caplog.set_level(logging.DEBUG)
+        return caplog
+
+    def test_health_check_not_logged(self, captured_logs):
+        """Test that health check endpoints are not logged."""
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        app = FastAPI()
+
+        @app.get("/health")
+        async def health():
+            return {"status": "ok"}
+
+        @app.get("/api/test")
+        async def test_endpoint():
+            return {"test": "data"}
+
+        # Apply the real middleware
+        app.add_middleware(CustomLoggingMiddleware, debug=False)
+
+        client = TestClient(app)
+
+        # Health check should not be logged
+        response = client.get("/health")
+        assert response.status_code == 200
+
+        # Other endpoint should be logged
+        response = client.get("/api/test")
+        assert response.status_code == 200
+
+        # Check that only the non-health endpoint was logged by our middleware
+        # Filter to only our middleware logs (ignore httpx logs)
+        middleware_logs = [
+            record.message
+            for record in captured_logs.records
+            if record.name == "src.middleware.logging_middleware"
+        ]
+        assert not any("/health" in msg for msg in middleware_logs)
+        assert any("/api/test" in msg for msg in middleware_logs)
+
+    def test_oauth_endpoints_production_mode(self, captured_logs):
+        """Test OAuth endpoints hide sensitive data in production mode."""
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        app = FastAPI()
+
+        @app.get("/oauth/authorize")
+        async def authorize():
+            return {"status": "redirect"}
+
+        @app.get("/oauth/callback")
+        async def callback():
+            return {"status": "callback"}
+
+        @app.post("/oauth/token")
+        async def token():
+            return {"access_token": "secret"}
+
+        # Apply the real middleware in production mode
+        app.add_middleware(CustomLoggingMiddleware, debug=False)
+
+        client = TestClient(app)
+
+        # Test OAuth endpoints with sensitive query params
+        response = client.get(
+            "/oauth/authorize?client_id=secret&redirect_uri=http://example.com"
+        )
+        assert response.status_code == 200
+
+        # Check logs - should NOT contain query parameters
+        # Filter to only our middleware logs
+        oauth_logs = [
+            r
+            for r in captured_logs.records
+            if r.name == "src.middleware.logging_middleware"
+            and "/oauth/authorize" in r.message
+        ]
+        assert len(oauth_logs) > 0
+        assert "client_id=secret" not in oauth_logs[0].message
+        assert "redirect_uri" not in oauth_logs[0].message
+        assert "GET /oauth/authorize - 200" in oauth_logs[0].message
+
+    def test_oauth_endpoints_debug_mode(self, captured_logs):
+        """Test OAuth endpoints show full URLs in debug mode."""
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        app = FastAPI()
+
+        @app.get("/oauth/authorize")
+        async def authorize():
+            return {"status": "redirect"}
+
+        # Apply the real middleware in debug mode
+        app.add_middleware(CustomLoggingMiddleware, debug=True)
+
+        client = TestClient(app)
+
+        # Test OAuth endpoint with sensitive query params
+        response = client.get(
+            "/oauth/authorize?client_id=secret&redirect_uri=http://example.com"
+        )
+        assert response.status_code == 200
+
+        # In debug mode, logs SHOULD contain query parameters
+        oauth_logs = [
+            r
+            for r in captured_logs.records
+            if r.name == "src.middleware.logging_middleware"
+            and "oauth/authorize" in r.message
+            and r.levelname == "DEBUG"
+        ]
+        assert len(oauth_logs) > 0
+        assert "client_id=secret" in oauth_logs[0].message
+
+    def test_mcp_proxy_logging(self, captured_logs):
+        """Test MCP proxy endpoints include service ID in logs."""
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        app = FastAPI()
+
+        @app.post("/calculator/mcp")
+        async def mcp_endpoint():
+            return {"result": "success"}
+
+        # Apply the real middleware
+        app.add_middleware(CustomLoggingMiddleware, debug=False)
+
+        client = TestClient(app)
+        response = client.post("/calculator/mcp")
+        assert response.status_code == 200
+
+        # Check logs include service ID
+        mcp_logs = [
+            r
+            for r in captured_logs.records
+            if r.name == "src.middleware.logging_middleware" and "/mcp" in r.message
+        ]
+        assert len(mcp_logs) > 0
+        assert "POST /calculator/mcp - 200" in mcp_logs[0].message
+
+    def test_wellknown_oauth_endpoints(self, captured_logs):
+        """Test .well-known OAuth endpoints are treated as OAuth endpoints."""
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        app = FastAPI()
+
+        @app.get("/.well-known/oauth-authorization-server")
+        async def oauth_metadata():
+            return {"issuer": "http://example.com"}
+
+        # Apply the real middleware
+        app.add_middleware(CustomLoggingMiddleware, debug=False)
+
+        client = TestClient(app)
+        response = client.get("/.well-known/oauth-authorization-server?service_id=test")
+        assert response.status_code == 200
+
+        # Check logs don't include query params
+        wellknown_logs = [
+            r
+            for r in captured_logs.records
+            if r.name == "src.middleware.logging_middleware"
+            and ".well-known/oauth" in r.message
+        ]
+        assert len(wellknown_logs) > 0
+        assert "service_id=test" not in wellknown_logs[0].message
+
+    def test_regular_endpoints_logged_normally(self, captured_logs):
+        """Test non-OAuth, non-MCP endpoints are logged normally."""
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        app = FastAPI()
+
+        @app.get("/services")
+        async def list_services():
+            return {"services": []}
+
+        # Apply the real middleware
+        app.add_middleware(CustomLoggingMiddleware, debug=False)
+
+        client = TestClient(app)
+        response = client.get("/services")
+        assert response.status_code == 200
+
+        # Check normal endpoint logging
+        service_logs = [
+            r
+            for r in captured_logs.records
+            if r.name == "src.middleware.logging_middleware"
+            and "/services" in r.message
+        ]
+        assert len(service_logs) > 0
+        assert "GET /services - 200" in service_logs[0].message
