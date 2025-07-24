@@ -19,6 +19,7 @@ from .auth.oauth_server import OAuthServer
 from .auth.provider_manager import ProviderManager
 from .auth.token_manager import TokenManager
 from .config.config import ConfigManager
+from .middleware.logging_middleware import CustomLoggingMiddleware
 from .proxy.mcp_proxy import McpProxy
 from .storage.manager import StorageManager
 
@@ -266,6 +267,9 @@ class McpGateway:
             expose_headers=self.config.cors.expose_headers,
         )
 
+        # Custom logging middleware
+        self.app.add_middleware(CustomLoggingMiddleware, debug=self.config.debug)
+
     def _setup_routes(self):
         """Setup application routes."""
 
@@ -510,9 +514,12 @@ class McpGateway:
                     if hasattr(oauth_state_obj, "resource")
                     else "None"
                 )
-                logger.info(
-                    f"Creating authorization code for user '{user_id}' with resource '{resource_value}'"
-                )
+                if self.config.debug:
+                    logger.debug(
+                        f"Creating authorization code for user '{user_id}' with resource '{resource_value}'"
+                    )
+                else:
+                    logger.info("Creating authorization code")
                 auth_code = await self.oauth_server.create_authorization_code(
                     user_id, oauth_state_obj
                 )
@@ -713,9 +720,10 @@ class McpGateway:
                 resource_uri = self.metadata_provider.get_service_canonical_uri(
                     service_id
                 )
-                logger.info(
-                    f"Validating token for service '{service_id}': canonical_uri='{resource_uri}'"
-                )
+                if self.config.debug:
+                    logger.debug(
+                        f"Validating token for service '{service_id}': canonical_uri='{resource_uri}'"
+                    )
                 if not self.oauth_server:
                     headers = {
                         "WWW-Authenticate": f'Bearer resource_metadata="{self.config.issuer}/.well-known/oauth-protected-resource?service_id={service_id}"'
@@ -730,14 +738,18 @@ class McpGateway:
                     credentials.credentials, resource=resource_uri
                 )
 
-                logger.info(
-                    f"Token validation for service '{service_id}': payload={bool(token_payload)}, expected_resource='{resource_uri}'"
-                )
+                if self.config.debug:
+                    logger.debug(
+                        f"Token validation for service '{service_id}': payload={bool(token_payload)}, expected_resource='{resource_uri}'"
+                    )
 
                 if not token_payload:
-                    logger.warning(
-                        f"Token validation failed for service '{service_id}' with resource '{resource_uri}'"
-                    )
+                    if self.config.debug:
+                        logger.warning(
+                            f"Token validation failed for service '{service_id}' with resource '{resource_uri}'"
+                        )
+                    else:
+                        logger.warning("Token validation failed")
                     headers = {
                         "WWW-Authenticate": f'Bearer resource_metadata="{self.config.issuer}/.well-known/oauth-protected-resource?service_id={service_id}"'
                     }
@@ -839,4 +851,4 @@ if __name__ == "__main__":
         )
     else:
         # Use app instance for production
-        uvicorn.run(app, host=host, port=port, log_level="info")
+        uvicorn.run(app, host=host, port=port, log_level="warning", access_log=False)
