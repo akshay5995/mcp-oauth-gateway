@@ -1,6 +1,6 @@
 # MCP OAuth Gateway
 
-### [This is Proof of Concept Not Menat to be Used in Production]
+### [⚠️⚠️⚠️ Proof of Concept (PoC) not suited for Production Use ⚠️⚠️⚠️]
 
 A OAuth 2.1 authorization server that provides transparent authentication and authorization for Model Context Protocol (MCP) services.
 
